@@ -22,7 +22,7 @@ CREATE TABLE public.cliente (
 
 def _filled():
     form, rows = service.columns_from_ddl(DDL)
-    f = {**service.empty_form(), **form, "dataset": "vendas", "rawPath": "s3://raw-{env}/vendas/cliente/",
+    f = {**service.empty_form(), **form, "dataset": "vendas",
          "rawPartitionColumn": "dt_ingestao", "incrementalColumns": ["updated_at"],
          "cryptographySecretArn": "arn:crypto"}
     for r in rows:
@@ -89,7 +89,7 @@ def test_form_from_contract_roundtrip():
     form, servers, rows = _filled()
     text = service.dump_contract(service.build_contract(form, servers, rows))
     form2, servers2, rows2 = service.form_from_contract(text)
-    assert form2["dataset"] == "vendas" and form2["rawPath"] == form["rawPath"]
+    assert form2["dataset"] == "vendas" and form2["rawPartitionColumn"] == "dt_ingestao"
     assert servers2[0]["secretId"] == "arn:secret"
     assert [r["name"] for r in rows2] == [r["name"] for r in rows]
     assert next(r for r in rows2 if r["name"] == "nu_cpf")["encrypt"] is True

@@ -52,7 +52,7 @@ O navegador abre em `http://localhost:8501` com uma linha do tempo de 4 etapas:
 
 | Etapa | O que você faz |
 |---|---|
-| **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, origem por ambiente (host, secret), destino na raw e coluna de partição. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
+| **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
 | **2. Campos** | Recebe os campos com o **nome na staging** e a descrição propostos para a transformação. Edite o que quiser direto na tabela. |
 | **3. Validação** | Vê um checklist (✅ ok, ⚠️ aviso, ❌ erro) e a prévia do contrato, do `ingestion.yml` e da transformação. Com erro, o botão de gerar fica bloqueado. |
 | **4. Geração** | Escolhe a pasta de saída (e, se quiser, o prefixo S3) e clica em **Gerar arquivos**. Baixa o contrato, o `ingestion.yml` ou tudo em `.zip`. |
@@ -90,7 +90,6 @@ O mínimo que o contrato precisa ter:
 | Chave da tabela | `primaryKey: true` na(s) coluna(s) |
 | Coluna de data para a carga incremental | `partitioned: true` |
 | Coluna de partição da raw | `rawPartitionColumn` (sem valor padrão) |
-| Onde gravar na raw | `rawPath` |
 
 Para editar visualmente (opcional): `npx datacontract-editor contracts\sakila\actor.odcs.yaml`.
 

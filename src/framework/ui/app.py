@@ -308,13 +308,15 @@ def step_contract():
     with c3:
         ss.form["numQueriesParallel"] = int(ss.form.get("numQueriesParallel") or 1)
         bound(st.number_input, "Leitura paralela (queries)", "numQueriesParallel", min_value=1, max_value=64)
-    c1, c2, c3 = st.columns([2, 1, 1])
+    c1, c2, c3 = st.columns([1, 1, 2])
     with c1:
-        field_input("Destino na raw (S3) *", "rawPath", "{env} é trocado por dev/hml/prd.", "s3://bucket-{env}-raw/vendas/cliente/")
-    with c2:
         field_input("Coluna de partição da raw *", "rawPartitionColumn", placeholder="dt_ingestao")
-    with c3:
+    with c2:
         field_input("Database da raw", "rawDatabase", "Vazio = raw_<dataset>.")
+    with c3:
+        dataset, table = ss.form.get("dataset") or "<dataset>", ss.form.get("table") or "<tabela>"
+        st.markdown(f"**Destino na raw**  \n`<bucket da raw>/{dataset}/{table}/`")
+        st.caption("Sempre dataset/tabela. O bucket é informado na execução do orquestrador (--raw-bucket).")
     if any(c.get("encrypt") for c in ss.columns):
         field_input("Secret da chave de criptografia (ARN) *", "cryptographySecretArn")
 

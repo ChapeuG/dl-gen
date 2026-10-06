@@ -44,7 +44,7 @@ def empty_form() -> dict:
         "id": str(uuid.uuid4()), "version": "1.0.0", "dataset": "", "domain": "", "table": "", "physicalName": "",
         "description": "", "owner": "", "sourceType": "postgres", "schema": "",
         "loadMode": "incremental", "incrementalColumns": [], "fetchSize": 150000, "numQueriesParallel": 1,
-        "rawPath": "", "rawDatabase": "", "rawPartitionColumn": "", "cryptographySecretArn": "",
+        "rawDatabase": "", "rawPartitionColumn": "", "cryptographySecretArn": "",
         "qualityUniqueKey": True, "qualityNotEmpty": True,
     }
 
@@ -99,7 +99,7 @@ def form_from_contract(text: str, table: str = "") -> tuple[dict, list[dict], li
             "schema": next((s.get("schema", "") for s in servers if s.get("schema")), ""),
             "loadMode": tp.get("loadMode", "incremental"), "incrementalColumns": list(tp.get("incrementalColumns") or []),
             "fetchSize": int(tp.get("fetchSize") or 150000), "numQueriesParallel": int(tp.get("numQueriesParallel") or 1),
-            "rawPath": tp.get("rawPath", ""), "rawDatabase": tp.get("rawDatabase", ""),
+            "rawDatabase": tp.get("rawDatabase", ""),
             "rawPartitionColumn": tp.get("rawPartitionColumn", ""),
             "cryptographySecretArn": tp.get("cryptographySecretArn", ""),
             "qualityUniqueKey": any(q.get("metric") == "duplicateValues" for q in t.get("quality") or []),
@@ -209,7 +209,6 @@ def build_contract(form: dict, servers: list[dict], columns: list[dict], naming:
         "fetchSize": int(form.get("fetchSize") or 150000) if int(form.get("fetchSize") or 150000) != 150000 else None,
         "numQueriesParallel": int(form.get("numQueriesParallel") or 1) if int(form.get("numQueriesParallel") or 1) > 1 else None,
         "rawPartitionColumn": str(form.get("rawPartitionColumn") or "").strip(),
-        "rawPath": str(form.get("rawPath") or "").strip(),
         "rawDatabase": str(form.get("rawDatabase") or "").strip(),
         "cryptographySecretArn": str(form.get("cryptographySecretArn") or "").strip() if encrypt else "",
     })
@@ -316,7 +315,6 @@ def _required_checks(contract: dict) -> list[Check]:
         need(bool(s.get("host")), f"Host do ambiente {s.get('environment')}",
              "Sem host no contrato: ele precisa estar na secret (host ou url).", level="warning")
     need(bool(tp.get("rawPartitionColumn")), "Coluna de partição da raw", "Informe a coluna de partição da raw.")
-    need(bool(tp.get("rawPath")), "Destino na raw (rawPath)", "Informe o caminho S3 da raw (use {env} para o ambiente).")
     if any(str(custom_props(p).get("encrypt")).lower() == "true" for p in props):
         need(bool(tp.get("cryptographySecretArn")), "Chave de criptografia",
              "Há coluna criptografada: informe o ARN da secret com a chave AES.")

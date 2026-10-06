@@ -1,6 +1,6 @@
 # Modelo de data contract (ODCS v3.2.0) — tabela cred_final (exemplos/cred_final.sql)
 #
-# Tudo que dá para tirar do DDL já está preenchido. Troque os PREENCHER (servidor, secret, bucket):
+# Tudo que dá para tirar do DDL já está preenchido. Troque os PREENCHER (servidor e secret):
 # enquanto existirem, o framework avisa e o orquestrador não executa.
 # Explicação de cada campo: ingestion-orchestrator/contracts/template.odcs.yaml
 #
@@ -67,8 +67,6 @@ schema:
         value: incremental
       - property: rawPartitionColumn
         value: dt_ingestao
-      - property: rawPath
-        value: s3://PREENCHER-{env}-raw/previsao/cred_final/
       - property: rawDatabase
         value: raw_previsao
     properties:

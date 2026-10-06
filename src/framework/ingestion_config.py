@@ -5,6 +5,7 @@ origem (conector + servidores por ambiente), carga (incremental/full, paralelism
 colunas, criptografia, destino na raw e regras de qualidade.
 
 Valores com {env} são resolvidos pelo orquestrador em tempo de execução (--env dev|hml|prd).
+O destino na raw não fica no yml: é sempre <--raw-bucket>/<dataset>/<tabela>/ (montado pelo orquestrador).
 Sem contrato (entrada por DDL), o que não pode ser inferido sai como PREENCHER.
 """
 
@@ -145,7 +146,6 @@ def build_ingestion_config(schema: SchemaInfo, source_db: str, contract_text: st
             for f in fields
         ],
         "target": {
-            "path": tprops.get("rawPath") or f"s3://{PLACEHOLDER}-{{env}}-raw/{dataset}/{table_name}/",
             "database": tprops.get("rawDatabase") or f"raw_{dataset}",
             "table": tprops.get("rawTable") or table_name,
             "partitionColumn": tprops.get("rawPartitionColumn") or PLACEHOLDER,  # obrigatório no contrato

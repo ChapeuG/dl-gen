@@ -42,7 +42,6 @@ def test_full_flow(tmp_path, monkeypatch):
     assert _button(at, "Próximo: campos").disabled  # falta o dataset
 
     _text(at, "Dataset").set_value("vendas").run()
-    _text(at, "Destino na raw").set_value("s3://raw-{env}/vendas/cliente/").run()
     _text(at, "Coluna de partição da raw").set_value("dt_ingestao").run()
     # a tabela de servidores é um data_editor: preenche pelo estado
     at.session_state.servers = [{"environment": "prd", "host": "db", "port": 5432, "database": "crm", "secretId": "arn:secret"}]
@@ -79,7 +78,6 @@ def test_validation_blocks_generation_without_secret():
     at.text_area[0].set_value(DDL).run()
     _button(at, "Importar colunas da DDL").click().run()
     _text(at, "Dataset").set_value("vendas").run()
-    _text(at, "Destino na raw").set_value("s3://raw-{env}/vendas/cliente/").run()
     _text(at, "Coluna de partição da raw").set_value("dt_ingestao").run()
     _button(at, "Próximo: campos").click().run()
     _button(at, "Próximo: validar").click().run()

@@ -41,8 +41,6 @@ schema:
     customProperties:
       - property: incrementalColumns
         value: [DH_ATLZ]
-      - property: rawPath
-        value: s3://raw-{env}/cartoes/cliente/
       - property: cryptographySecretArn
         value: arn:crypto
       - property: rawPartitionColumn
@@ -175,7 +173,7 @@ def test_ingestion_yml(contract_file):
         "prd": {"host": "db.prd", "port": 1521, "database": "CRTPRD", "secretId": "arn:secret:prd"}}}
     assert cfg["load"]["mode"] == "incremental"
     assert cfg["load"]["incrementalColumns"] == ["DH_INCL", "DH_ATLZ"]
-    assert cfg["target"]["path"] == "s3://raw-{env}/cartoes/cliente/"
+    assert "path" not in cfg["target"]  # destino = <raw-bucket>/<dataset>/<tabela>/ no orquestrador
     assert cfg["target"]["database"] == "raw_cartoes"
     assert cfg["target"]["partitionColumn"] == "anomesdia"
     assert cfg["encryption"]["columns"] == ["NU_CPF"] and cfg["encryption"]["secretArn"] == "arn:crypto"
