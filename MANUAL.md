@@ -19,7 +19,7 @@ ao Data Lake:
 ```
 
 - **Ingestão:** sai um arquivo `ingestion.yml`, que o projeto
-  [`ingestion-orchestrator`](../../ingestion-orchestrator/README.md) usa para ler a origem e gravar na raw.
+  [`ingestion-orchestrator`](https://github.com/ChapeuG/ingestion-orchestrator) usa para ler a origem e gravar na raw.
 - **Transformação:** sempre sai o projeto Scala `<dataset>-transformation`, no padrão das skills da empresa.
 
 ---
@@ -30,7 +30,8 @@ Precisa de **Python 3.10+**. Para compilar os projetos Scala gerados, também do
 gravados, mas não compilados).
 
 ```powershell
-cd C:\Users\<matricula>\...\framework\framework
+git clone https://github.com/ChapeuG/dl-gen.git
+cd dl-gen
 pip install -e ".[ui]"
 ```
 
@@ -71,7 +72,8 @@ O passo a passo abaixo faz a mesma coisa pela linha de comando.
 O template e os exemplos ficam no projeto do orquestrador:
 
 ```powershell
-cd C:\Users\<matricula>\...\ingestion-orchestrator
+git clone https://github.com/ChapeuG/ingestion-orchestrator.git
+cd ingestion-orchestrator
 python scripts\novo_contrato.py sakila actor --domain exemplos
 ```
 
@@ -98,8 +100,8 @@ Abra o terminal numa **pasta de trabalho** (os projetos são criados na pasta at
 passe o **caminho completo** do contrato:
 
 ```powershell
-cd C:\Users\<matricula>\Desktop\Projetos\Tabela
-dl-gen generate --contract C:\Users\<matricula>\...\ingestion-orchestrator\contracts\sakila\actor.odcs.yaml
+cd C:\trabalho\minha-tabela
+dl-gen generate --contract C:\caminho\do\ingestion-orchestrator\contracts\sakila\actor.odcs.yaml
 ```
 
 > Erro `Path '...' does not exist`: o caminho relativo não existe na pasta onde o terminal está. Use o caminho completo.
@@ -159,7 +161,7 @@ O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeComm
 
 **Sem contrato, só com o DDL** (o que o DDL não informa vai por opção):
 ```powershell
-dl-gen generate --ddl C:\Users\<matricula>\...\framework\framework\exemplos\cred_final.sql --dataset previsao --merge-keys cd_credenciadora,nm_produto,data
+dl-gen generate --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql --dataset previsao --merge-keys cd_credenciadora,nm_produto,data
 ```
 No modo contrato, o yml sai com `PREENCHER` onde faltar informação (servidor, secret, destino). Por isso, para a
 ingestão nova, prefira o contrato.
@@ -168,7 +170,7 @@ ingestão nova, prefira o contrato.
 
 **Só o bloco de campos (`ModelField`) para colar num Model existente:**
 ```powershell
-dl-gen campos --ddl C:\Users\<matricula>\...\framework\framework\exemplos\cred_final.sql -o Field.scala
+dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o Field.scala
 ```
 
 ---
@@ -178,7 +180,7 @@ dl-gen campos --ddl C:\Users\<matricula>\...\framework\framework\exemplos\cred_f
 Sem LLM, os nomes saem de um glossário (heurística). Com LLM ficam melhores. O framework sempre confere o resultado
 contra o padrão de nomenclatura e, se o LLM falhar, volta para a heurística sozinho.
 
-- **LiteLLM (PC corporativo):** a URL e a chave são lidas de `C:\Users\<matricula>\.claude\settings.json`, no bloco
+- **LiteLLM:** a URL e a chave são lidas de `C:\Users\<matricula>\.claude\settings.json`, no bloco
   `env` (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`, ou `LITELLM_BASE_URL` + `LITELLM_API_KEY`)
   ou no `apiKeyHelper`.
   ```powershell
