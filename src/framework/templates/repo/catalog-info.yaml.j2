@@ -1,0 +1,13 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ project_name }}
+  description: {{ project_name }}
+  annotations:
+    sonarqube.org/project-key: {{ project_name }}
+    github.com/project-slug: {{ github_org }}/{{ project_name }}
+  tags: []
+spec:
+  owner: group:default/engenharia-dados
+  type: other
+  lifecycle: development

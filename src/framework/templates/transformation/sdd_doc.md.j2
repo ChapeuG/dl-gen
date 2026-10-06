@@ -1,0 +1,96 @@
+# SDD — {{ table_name }}
+
+> Gerado pelo framework a partir do DDL. Seções marcadas como **Informação pendente** precisam ser completadas antes do desenvolvimento (skill sdd-specification).
+
+## 1. Identificação
+
+| Campo | Valor |
+|---|---|
+| Nome da tabela | `{{ table_name }}` |
+| Database | `{{ database }}` |
+| Comentário | {{ table_comment }} |
+| Origem dos dados | `{{ source_table }}` ({{ source_db }}) via ingestion-orchestrator (`ingestion-config/{{ dataset }}/{{ table_name }}.ingestion.yml`) — JSON gzip na raw |
+
+## 2. Particionamento
+
+| Nível | Campo | Tipo | Descrição |
+|---|---|---|---|
+{% for p in partitions %}
+| {{ loop.index }} | `{{ p.name }}` | StringType | {{ p.comment }} |
+{% endfor %}
+
+{% if partition_inferred %}
+**Informação pendente:** a partição de dados foi inferida da coluna `{{ partition_source_raw }}`. Confirme ou informe `--partition-col`.
+{% elif not partition_source_raw %}
+**Informação pendente:** o DDL não tem coluna de data/timestamp; só há a partição de atualização. Confirme se é suficiente.
+{% endif %}
+
+## 3. Chave de Merge (Deduplicação/Upsert)
+
+{% if merge_keys %}
+Campos: {% for k in merge_keys %}`{{ k }}`{% if not loop.last %}, {% endif %}{% endfor %} (origem: {{ merge_keys_source }}).
+{% else %}
+**Informação pendente:** nenhuma chave de merge definida. Informe `--merge-keys`.
+{% endif %}
+{% if merge_keys_source == "heurística" %}
+
+**Informação pendente:** a chave foi escolhida por heurística (primeiro campo não nulo). Confirme com `--merge-keys`.
+{% endif %}
+
+Deduplicação: registro mais recente por chave, ordenado por `{{ timestamp_field }}`.
+
+## 4. Schema — Campos Principais
+
+| rawField | stagingField | dataType | transformation | customFormat | Comentário |
+|---|---|---|---|---|---|
+{% for f in fields %}
+| `{{ f.source }}` | `{{ f.target }}` | {{ f.data_type }} | {{ f.transformation or "null" }} | {{ f.source_format or "-" }} | {{ f.comment }}{% if f.encrypted %} **[criptografado na ingestão]**{% endif %} |
+{% endfor %}
+| derivado | `dh_criacao_registro` | TimestampType | null | - | Data e horário da criação do registro na camada. |
+| derivado | `dh_atualizacao_registro` | TimestampType | null | - | Data e horário da última atualização do registro na camada. |
+
+## 5. Campos Aninhados (NestedField)
+
+Nenhum. Todos os campos são flat.
+
+## 6. Regras de Negócio
+
+{% if encrypted %}
+- Segurança: {% for f in encrypted %}`{{ f.target }}`{% if not loop.last %}, {% endif %}{% endfor %} chegam criptografados (AES/ECB + base64) da ingestão; preservados sem transformação.
+{% endif %}
+{% if cents %}
+- Valores em centavos na origem (divididos por 100): {% for f in cents %}`{{ f.target }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+{% endif %}
+
+**Informação pendente:** domínios de valores, regras condicionais e campos derivados.
+
+## 7. Enrichments
+
+Nenhum enrichment definido.
+
+**Informação pendente:** confirme se a tabela precisa de joins com tabelas de lookup.
+
+## 8. Joins Inter-tabelas
+
+Não aplicável.
+
+## 9. Transformações
+
+- `StringType default` → `trim(upper(col))`
+- `IntegerType/LongType/DecimalType default` → `col.cast(tipo)`
+- `DateType default` → `to_date(col)`; `format` → `to_date(col, customFormat)`
+- `TimestampType default` → `to_timestamp(normalizeTimestampString(col))`; `format` → com `customFormat`
+- `BooleanType default` → `S/N/true/false` → `true/false`
+- `null` → sem transformação (identificadores, criptografados)
+
+## 10. Escrita e Persistência
+
+| Atributo | Valor |
+|---|---|
+| Modo inicial | SaveMode.Overwrite com particionamento (`maxRecordsPerFile` ≈ 128MB / {{ avg_row_size }} bytes). |
+| Modo incremental | Delta MERGE com condições null-safe (`<=>`); `dh_criacao_registro` preservado. |
+| Merge keys | Seção 3. |
+| Persist | `MEMORY_AND_DISK` (tabela simples), `unpersist` no `finally`. |
+| Manifesto | `symlink_format_manifest`. |
+| Tabela Hive | `CREATE EXTERNAL TABLE IF NOT EXISTS {{ database }}.{{ table_name }}` + `ALTER TABLE ADD COLUMNS`. |
+| Partições | `ALTER TABLE ADD IF NOT EXISTS PARTITION` em lotes de 100. |

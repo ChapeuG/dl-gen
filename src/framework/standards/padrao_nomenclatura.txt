@@ -1,0 +1,647 @@
+Padrões Para Criação de
+Objetos de Dados - Ambiente Analítico
+(AWS)
+   •   Objetivo
+   •   Abrangência
+   •   Vínculos/ Documentação Complementar
+   •   Conceitos
+   •   Diretrizes
+          o Padrões Data Lake
+                  ▪ Nome de Buckets
+                  ▪ Nomes de DataBases
+                  ▪ Nome de Tabela
+                  ▪ Nome de Colunas de Tabelas
+                  ▪ Nome de Visão
+                  ▪ Colunas de Visão
+                  ▪ Nome de Arquivos Origem
+                  ▪ Uso de Data Types
+                  ▪ Quadro de Naturezas
+   •   Exceções
+   •   Vigência
+   •   Controle e Histórico de Versões
+   •   Aprovações
+
+
+Objetivo
+Estabelecer padrões de nomenclatura para a criação de estruturas de dados no data lake -
+AWS - Amazon Web Services.
+
+Importante:
+
+Qualquer necessidade de aplicação de padrões diferentes dos aqui apresentados devem seguir as
+orientações do item Exceções.
+
+
+Abrangência
+   •   Processo de criação de buckets, datasets, databases, tabelas, visões e arquivos no data
+       lake – AWS - Amazon Web Services.
+   •   Outros provedores de Cloud poderão ser incorporados a este procedimento e com isso as
+       devidas adequações e particularidades deverão ser consideradas.
+Vínculos/ Documentação Complementar
+  •   Política de Gerenciamento e Governança de Dados;
+  •   Procedimento de Modelagem de Dados – SQL - Bancos de Dados Relacionais;
+  •   Procedimento de Modelagem de Dados – NoSQL - Bancos de Dados não Relacionais;
+  •   Procedimento de Modelagem de Dados - Business Analytics – Data Lake (Cloudera);
+  •   DAMA-DMBOK® - Data Management Body of Knowledge - O Guia DAMA para o
+      corpo de conhecimento para Gerenciamento de Dados;
+  •   Boas práticas para padronização de nomes de Objetos de Dados adotadas na área de
+      tecnologia da informação.
+
+
+
+
+Conceitos
+Termo/Sigla                                     Definição
+              “é uma coleção de dados inter-relacionados, representando informações sobre
+Banco de      um domínio específico”, Korth. Conhecidos pelo nome de databases na empresa,
+dados         representam um agrupamento tabelas de um mesmo domínio de dados,
+              aplicação e ou área organizacional.
+              Um bucket S3 é um recurso de armazenamento no Amazon Web Services
+Bucket (s3)   (aws) Simple Storage Service (s3). São semelhantes a pastas de arquivos onde
+              podemos armazenar nossos dados e metadados.
+              Um data lake é um repositório centralizado que permite armazenar todos os
+              dados estruturados e não estruturados em qualquer escala. Pode-se armazenar
+              os dados como estão, sem ter que primeiro estruturá-los e executar diferentes
+              tipos de análises - de painéis e visualizações a processamento de big data,
+Data Lake
+              análises em tempo real e aprendizado de máquina para orientar melhores
+              decisões -. Em síntese o data lake é grande repositório de dados que representa
+              uma solução de nova geração para impulsionar o uso dos dados e informações
+              como diferencial competitivo e alavancar a jornada data-driven da empresa.
+              Unidade Lógica que define um agrupamento dos dados essenciais que
+              suportam determinado Domínio de Negócio associado a um ou mais
+              macroprocessos da Cadeia de Valor da empresa (Curso Modelagem de Dados
+              Corporativo – Carlos Caldo – versão 2014). por exemplo:
+Domínio de
+Dados             •   Domínio de negócio: Arranjo de Pagamentos;
+                  •   Domínio de dados: Autorização, Liquidação, Cadastro etc.
+
+              Neste contexto de nomeação de objetos, se aplica a nomes de datasets e
+              databases, conforme será descrito no item “Padrões – Data Lake”.
+                Termo componente do nome de colunas de tabelas e visões, cuja finalidade é
+Natureza do
+                definir uma classificação, de acordo com a semântica do dado, que apoie o
+Dado
+                entendimento sobre o que coluna representa. Exemplo: código, nome, data etc.
+                Termo componente do nome de objetos de dados, podendo ser uma palavra
+Qualificador    simples ou composta, que ajuda o termo essencial a conferir maior clareza e
+                entendimento sobre o significado do objeto nomeado.
+                Uma tabela é um objeto de banco de dados organizado de maneira lógica em
+                um formato de linha (registro único) e coluna (características do registro). Uma
+Tabela e
+                Visão é uma maneira alternativa de observação de dados de uma ou
+Visão
+                mais tabelas. Em sua essência, uma visão pode ser considerada como uma
+                tabela virtual ou uma consulta armazenada.
+Termo           Palavra simples ou composta que expressa um objeto, fato ou evento e são
+essencial       utilizados para nomeação de objetos de dados.
+                Camadas que permitem separação lógica/física dos dados e conferem um
+                entendimento claro da organização do data lake em termos de armazenamento
+                dos dados, de acordo com suas características.
+
+                   •   Landing Zone: Zona onde os dados “aterrissam” em 1ª instância. É a
+                       porta de entrada do data lake. Nesta zona dados qualificados como
+                       Personal Identifiable Informationv (PII) serão checados e tratados, se
+                       necessário, para assegurar o devido alinhamento com as exigências da
+                       Lei Geral de Proteção de Dados (LGPD).
+Zonas do           •   Raw Zone: Zona de dados “brutos”. Nesta zona os dados serão
+Data Lake              preservados como estão em sua Origem.
+                   •   Staging Zone: Zona onde os dados serão tratados em aspectos básicos
+                       (light tranformation) e padronizados; são dados já com alguma
+                       qualidade e padronização.
+                   •   Final Zone: Zona onde os dados estarão prontos para serem
+                       consumidos por qualquer usuário que necessite deles para execução de
+                       seu trabalho na empresa e tenha permissão para acessá-los. São dados que já
+                       sofreram um tratamento de qualidade mais acurado (heavy
+                       transformation) e estão em estado final e prontos para consumo.
+
+
+
+Diretrizes
+Padrões Data Lake
+Nome de Buckets
+
+No que tange a organização teremos quatro buckets (um para cada zona do data lake, conforme
+Figura 01). Cada bucket irá conter vários datasets que servirão como unidades de agrupamento
+de tabelas /arquivos de um mesmo domínio de dados, Aplicação, Área Organizacional da empresa ou
+Entidade Externa (pública ou privada).
+
+
+
+
+Abaixo a estrutura do padrão de nome de buckets:
+
+s3://corp-app-env-awsregion-awsaccount-
+zone/team/dataset/table_name/<file_name>
+
+   •   corp-app: constante datalake
+   •   env: Ambientes possíveis – dev (desenvolvimento), ti (teste), certificação
+       (Homologação), prd (produção).
+   •   awsregion: Região da aws.
+   •   awsaccount: Conta aws responsável pela criação do Buckect.
+   •   dataset: Nomes de: Domínio de Dados , Aplicação, Área Organizacional da empresa ou
+       Entidade Externa (pública ou privada).
+   •   zone: Zona do data lake (landing, raw, staging, final).
+   •   team: Representado por um nome de processo: ingestaolake.
+   •   table_name: nome da tabela.
+   •   file name: nome do arquivo.
+
+Importante: A definição de nomes de buckects e datasets será feita pela Governança de Dados
+que verificará a melhor opção para representar a abrangência dos dados.
+
+Exemplos:
+
+                                          Buckets
+s3://datalake-prd-<regiao>-<conta>-
+landing/ingestaolake/cadastro_corporativo/emissor/ filename2021-09-09.txt
+s3://datalake-prd-<regiao>-<conta>-
+raw/ingestaolake/cadastro_corporativo/emissor/<filename2021-09-09>.txt
+s3://datalake-prd-<regiao>-<conta>-
+staging/ingestaolake/cadastro_corporativo/emissor/2021-01-
+1/194b5de5c5eca1b9bb22ae3934446760.parquet
+s3://datalake-prd-<regiao>-<conta>-
+final/ingestaolake/cadastro_corporativo/emissor/2021-01-
+1/194b5de5c5eca1b9bb22ae3934446760.parquet
+s3://datalake-prd-<regiao>-<conta>-landing/ingestaolake/autorizacao/autorizacao/
+filename2021-09-09.txt
+s3://datalake-prd-<regiao>-<conta>-
+raw/ingestaolake/autorizacao/autorizacao/<filename2021-09-09>.txt
+s3://datalake-prd-<regiao>-<conta>-
+staging/ingestaolake/autorizacao/autorizacao/2021-01-
+01/194b5de5c5eca1b9bb22ae3934446760.parquet
+s3://datalake-prd-<regiao>-<conta>-final/ingestaolake/autorizacao/autorizacao/2021-
+01-01/194b5de5c5eca1b9bb22ae3934446760.parquet
+
+Nomes de DataBases
+te_qualificador1_qualificador2_qualificador3_zone
+
+   •   te: termo essencial que representa um contexto de dados, sendo representado por um
+       Nome de:
+            o Domínio de Dados;
+            o Aplicação específica;
+            o Área Organizacional da empresa ou Entidade Externa (pública ou privada).
+
+Importante: A definição de termos essenciais para databases será feita pela Governança de
+Dados que verificará a melhor opção para representar a abrangência dos dados do database,
+sempre prezando pela semântica, a praticidade e facilidade de utilização.
+
+   •   qualificador1 a qualificador3: Opcional – Até 3 termos qualificadores que ajudam o
+       termo essencial a conferir maior clareza ao nome do database.
+   •   zone: Identifica a zona do data lake ao qual o database está associado: raw, staging e
+       final.
+
+Importante: Não há a obrigatoriedade de criação de databases para todas as camadas. Porém, o
+padrão acima faculta a criação de databases para todas elas, em caso de necessidade.
+
+Regras:
+   •   Todo database deve possuir uma descrição que permita conhecer o que ele contém. Esta
+       definição deverá ser armazenada no catálogo de dados.
+   •   Todos os termos e qualificadores devem existir no glossário de termos da empresa e devem
+       estar em caixa baixa, escritos em português, por extenso e no singular.
+
+Exceções:
+
+   •   Siglas consagras no mercado e ou na empresa (ex: bndes, ec) podem ser utilizadas e inclusive
+       em caixa alta caso se julgue necessário para facilitar entendimento e destaque.
+   •   Termos e qualificadores podem ser escritos em inglês, desde que consagrados no
+       mercado e ou na empresa. A Governança de Dados deve analisar cada caso.
+
+Exemplos:
+
+          Databases
+autorizacao_raw
+autorizacao_staging
+autorizacao_final
+cadastro_corporativo_raw
+cadastro_corporativo_staging
+cadastro_corporativo_final
+liquidação_final
+
+Nome de Tabela
+
+te_ qualificador1 a qualificador10
+
+   •   te: termo essencial que nomeia a tabela de acordo com o seu significado no contexto de
+       negócio.
+   •   qualificador1 a qualificador10: Opcional - Até 10 termos qualificadores que ajudam o
+       termo essencial a definir de forma clara e objetiva o significado de uma tabela.
+
+Importante: Deve-se privilegiar nomes com até 5 qualificadores. Somente para casos especiais,
+em que realmente seja necessário, utilizar mais qualificadores.
+
+Regras:
+
+   •   Toda tabela deve possuir uma descrição que permita conhecer o seu conteúdo. Esta
+       definição deverá ser armazenada no catálogo de dados.
+   •   Todos os termos e qualificadores devem existir no glossário de termos da empresa e devem
+       estar em caixa baixa, escritos em português, por extenso e no singular.
+   •   Não se deve utilizar preposições, artigos, conectivos (o, a, de...) etc.
+   •   Número podem ser utilizados como qualificadores, ou seja, nunca como naturezas ou
+       termos essenciais.
+
+Exceções:
+
+   •   Siglas consagras no mercado e ou na empresa (ex: ec, abecs) podem ser utilizadas.
+   •   Termos e qualificadores podem ser escritos em inglês, desde que consagrados no
+       mercado e ou na empresa. A Governança de dados deve analisar cada caso.
+   •   Tabelas pertencentes à eventuais databases criados para a camada raw não necessitam
+       que termos e qualificadores estejam no glossário de termos.
+
+Exemplos:
+
+Tabelas (database.table)
+autorizacao_staging. autorizacao
+autorizacao_fin. autorizacao
+cadastro_corporativo_final.bin
+cadastro_corporativo_final.emissor
+liquidação_final.lancamento_recebido
+
+Nome de Colunas de Tabelas
+natureza_ te_qualificador1 a qualificador10
+
+   •   natureza: natureza abreviada que tipifica a coluna (vide item Quadro de naturezas).
+   •   te: Termo essencial que nomeia a coluna de acordo com o seu significado no contexto de
+       negócio.
+   •   qualificador1 a qualificador10: Opcional - Até 4 termos qualificadores que ajudam o
+       termo essencial a definir de forma clara e objetiva o significado de uma coluna.
+
+Importante: Deve-se privilegiar nomes com até 5 qualificadores. Somente para casos especiais,
+em que realmente seja necessário, utilizar mais qualificadores.
+
+Regras:
+
+   •   Todos as naturezas devem estar no glossário de termos e devem ser escritas em sua forma
+       abreviada (vide item Quadro de naturezas).
+   •   Todos os termos e qualificadores devem existir no glossário de termos da empresa e
+
+    devem estar em caixa baixa, escritos em português, por extenso e no singular.
+   •   Toda tabela, independentemente da zona, deve conter a coluna dh_criacao_data_lake
+       (data e horário de criação do registro no data lake).
+   •   Toda tabela, independentemente da zona, deve conter a coluna dh_criacao_registro
+       (data e horário de criação do registro na zona alvo (raw, staging, final)).
+   •   Toda tabela, independentemente da zona, deve conter a coluna dh_atualizacao_registro
+       (data e horário da última atualização do registro na zona alvo (raw, staging, final)).
+   •   Toda tabela que necessitar de particionamento deve conter uma coluna cujo último
+       qualificador seja particao, por exemplo: dt_criacao_data_lake_particao,
+       dt_transacao_bit13_particao. A decisão da coluna é atribuição da Engenharia de Dados
+       que irá considerar a zona e as necessidades de requisitos não funcionais.
+
+Exceções:
+
+   •   Siglas consagras no mercado e ou na empresa (ex: ec, abecs, cpf, cnpj, bin) podem ser
+       utilizadas.
+   •   Termos e qualificadores podem ser escritos em inglês, desde que consagrados no
+       mercado e ou na empresa. A Governança de dados deve analisar cada caso.
+   •   Colunas de tabelas pertencentes à eventuais databases criados para a camada raw não
+       necessitam seguir a padronização.
+   •   Toda coluna deve possuir uma descrição que permita conhecer o que ela contém. Esta
+       definição deverá ser armazenada no catálogo de dados.
+
+Exemplos:
+
+Colunas
+cd_processadora
+dc_motivo_cancelamento_transacao
+nm_ec
+nu_bin
+
+Nome de Visão
+te_qualificador1_qualificador2_qualificador3
+
+(idem padrão de nomes de tabelas)
+
+   •   te: Termo essencial que nomeia a visão de acordo com o seu significado no contexto de
+       negócio.
+   •   qualificador1 a qualificador3: Opcional - Até 3 termos qualificadores que ajudam o
+       termo essencial a definir de forma clara e objetiva o significado de uma visão.
+
+Regras:
+Termos e qualificadores devem ser escritos em português, por extenso, no singular e devem
+privilegiar a clareza de entendimento e facilidade de uso. Assim, não obrigatoriamente devem
+existir no glossário de termos da empresa.
+
+Exceções:
+
+   •   Siglas consagras no mercado e ou na empresa (ex: ec, abecs) podem ser utilizadas.
+   •   Termos e qualificadores podem ser escritos em inglês, desde que consagrados no
+       mercado e ou na empresa. A Governança de dados deve analisar cada caso.
+
+Exemplos:
+
+        Views (database.view)
+autorizacao_staging. autorizacao
+autorizacao_fin. autorizacao
+cadastro_corporativo_final.bin
+cadastro_corporativo_final.emissor
+liquidação_final.lancamento_recebido
+autorizacao_staging. autorizacao
+
+Colunas de Visão
+natureza_ te_q1_q2_q3_q4
+
+   •   natureza: natureza abreviada que tipifica a coluna (vide item Quadro de naturezas).
+   •   te: Termo essencial que nomeia a coluna de acordo com o seu significado no contexto de
+       negócio.
+   •   qualificador1 a qualificador4: Opcional - Até 4 termos qualificadores que ajudam o
+       termo essencial a definir de forma clara e objetiva o significado de uma coluna.
+
+Regras:
+
+   •   Todos as naturezas devem estar no glossário de termos e devem ser escritas em sua forma
+       abreviada (vide item Quadro de naturezas).
+   •   Todos os termos e qualificadores devem existir no glossário de termos da empresa e
+
+    devem estar em caixa baixa, escritos em português, por extenso e no singular.
+
+Exceções:
+
+   •   Siglas consagras no mercado e ou na empresa (ex: ec, abecs, cpf, cnpj, bin) podem ser
+       utilizadas.
+   •     Termos e qualificadores podem ser escritos em inglês, desde que consagrados no
+         mercado e ou na empresa. A Governança de dados deve analisar cada caso.
+   •     Em casos específicos onde exista à necessidade de simplificar nomes de colunas, visando
+         torná-los mais amigáveis para alguma área de negócio manipular dados (final zone, por
+         exemplo), não há necessidade de seguir os padrões. A Governança de dados deve analisar
+         cada caso.
+
+Nome de Arquivos Origem
+
+Regra:
+
+Arquivos de origem para ingestões no data lake deverão preservar seus nomes, oriundos da
+origem, tanto na landing quanto na raw_zone.
+
+Exceção:
+
+Quando desejado optar por outra nomenclatura, o padrão abaixo deverá ser respeitado:
+
+arq_te_qualificador1_qualificador2_ qualificador3_data_extensão
+
+   •     arq: constante para representar que se trata de um arquivo.
+   •     termos e qualificadores: Devem ser claros e conferir o entendimento sobre o que o
+         arquivo contempla.
+   •     data: Data de referência (aderente a semântica do arquivo) do arquivo. O formato pode
+         ser aaaammdd ou aaaamm, de acordo com a necessidade.
+
+    Observação: pode-se utilizar mais do que uma data quando se desejar externar um período
+    de – até.
+
+   •     Extensão: extensão do arquivo em caixa baixa.
+
+Exemplos:
+
+Arquivos
+arq_transacoes_reprocessadas_20211210.csv
+arq_fechamento_contabil_mensal_202112.txt
+arq_tributacao_trimestral_202101_2021_03
+
+Uso de Data Types
+
+   •     Para landing zone e raw zone data types devem ser preservados conforme estão na
+         origem.
+   •     Para staging zone e final zone os data types devem considerar as características de cada
+         coluna e as regras de qualidade vigentes.
+Quadro de Naturezas
+
+                                                    Exemplos de nomes de colunas com as
+ Natureza       Significado e Aplicabilidade
+                                                           respectivas naturezas
+              Atribuída aos dados numéricos
+              quando necessário armazenar em
+                                                   aa_declaracao_IRRF
+              determinada tabela, as ocorrências
+aa – ano.
+              específicas para determinado Ano
+                                                   aa_fabricacao_veiculo
+              em um calendário. Esta natureza
+              não identifica o dia ou o mês.
+              Atribuída aos dados numéricos ou
+              alfanuméricos que usuamente são
+              utilizados como um Identificador     cd_segmento_mercado
+              unívoco de um objeto. Podem
+cd - código   explicitar significado para o        cd_moeda
+              negócio por sí só, mas geralmente
+              dependem de um nome ou de uma        cd_pais
+              descrição para se tornar
+              significativo.
+              Atribuída aos dados que              dt_afiliacao_ec
+dt - data     representam uma data em um
+              calendário qualquer.                 dt_referencia_transacao
+              Atribuída aos dados que
+                                                   dh_transacao
+dh – data e   representam o registro de um
+horário       instante no tempo, através de uma
+                                                   dh_inclusao_registro
+              combinação DATA + HORÁRIO.
+              Atribuída aos dados que
+              representam um texto que pode        dc_caracteristica_tecinica_equipamento
+dc -
+              descrever um objeto, uma
+descrição
+              observação, etc. Utilizado para      dc_produto
+              descrições no geral.
+              Atribuída aos dados numéricos
+              quando necessário identificar
+                                                   dd_debito_cobranca
+              exatamente o dia em que foi
+dd - dia
+              gerada uma determinada
+                                                   dd_vencimento_tributo
+              ocorrência, sem levar em conta o
+              Ano e Mês.
+              Atribuída aos dados que
+                                                   hr_operacao_compra
+              especificam uma hora do dia, na
+hr - hora
+              sua forma completa ou não
+                                                   hr_inclusao_registro
+              (HH:MM:SS, HH:MM, HH).
+                                               Id _linha
+              Atribuida aos dados utilizados
+Id -          como identificadores únicos e
+                                               Id_controle_interno
+identificador cujos valores não possuem
+              significado para o negócio.
+                                               Id_processamento
+            Atribuída aos dados que traduzem
+            um estado do tipo binário (sim /
+            não, verdadeiro / falso, ativo /
+            inativo) de um objeto. Tipicamente
+            utilizada quando a descrição do
+            atributo é adequadamente feita
+            através da caracterização de apenas
+            um dos estados.
+
+            O domínio da natureza Indicador
+            deve ser exclusivamente ‘S’ ou ‘N’
+            (exceção para ambientes que
+            permitem Data Type Boolean; o
+            domínio pode ser True / False).
+
+            O preenchimento deve ser
+            obrigatório (Not Null) e quando
+            criado em tabelas que já possuem
+            dados, deverá ser definido um dos
+            valores permitidos como default
+            para os registros existentes. A
+            permanência ou não do valor           In_tratamento_especial_ec
+In -
+            default para os novos registros
+indicador
+            deverá ser discutida entre o          In_cartao_presente
+            arquiteto de dados e o líder do
+            squad ou analista responsável
+            visando aderência à regra de
+            negócio.
+
+            Registros com valores diferentes
+            de ‘S’ ou ‘N’ (ou True / False),
+            deverão ser tratados e convertidos
+            para a execução da carga.
+            Atributos de natureza Indicador
+            devem ser obrigatoriamente
+            binários, ou seja, sempre com
+            apenas duas opções de
+            preenchimento.
+
+            Casos onde são encontrados mais
+            do que duas opções de valores
+            válidos, devem ser reanalisados
+            para fazer o correto
+            enquadramento em outra natureza
+            – provavelmente como Codigo.
+            Atribuída aos dados numéricos
+            quando necessário identificar
+            exatamente o Mês em que foi         mm_referencia_movimento_contabil
+mm - mês    gerada uma determinada
+            ocorrência em um calendário         mm_inicio_contrato
+            qualquer, sem levar em conta o
+            Ano e Dia.
+            Atribuída aos dados que designam
+            um objeto; normalmente            nm_emissor
+            expressam uma identificação
+nm -nome    muitas vezes limitada, pois não   nm_ec
+            garantem a unicidade pela qual um
+            objeto é conhecido ou             nm_campanha_promocional
+            referenciado.
+            O número geralmente é uma
+            identificação do objeto atribuída
+            externamente e sua abrangência
+            extrapola o contexto da empresa,
+            ou seja, o seu conteúdo (valor) é
+            uma propriedade do Objeto que é
+            reconhecida no mundo dos
+            negócios, além das fronteiras do
+            sistema automatizado.
+
+            O número poderá ser utilizado
+            como chave primária no caso em
+            que sua nomenclatura seja         nm_telefone_comercial
+            consagrada na instituição (Numero
+nu - número Estabelecimento Comercial),       nm_cnpj_ec
+            porém, não é recomendado quando
+            seu domínio for externo a         nm_bin
+            organização (Numero CPF,
+            Numero CNPJ etc).
+
+            A natureza Numero também
+            deverá ser utilizada nos casos em
+            que o identificador único da
+            entidade seja um número
+            sequencial, por não existir na
+            entidade candidatos a chave
+            natural. Neste caso, utilizar o
+            termo “Sequencial” como primeiro
+            qualificador do atributo.
+               Atribuída aos dados que expressam
+               a razão percentual calculada entre pc_comissao_venda
+pc -
+               dois elementos da mesma natureza
+percentual
+               e está sempre associado à fração de pcercentual_tarifa_desconto
+               uma centena.
+               Atribuída aos dados numéricos que
+               expressam quantificações /        qt_transacao_efetuada
+qt -
+               medidas de fatos de um objeto,
+quantidade
+               com exceção de valores            qt_faciltador_inativo
+               monetários e percentuais.
+               Atribuída aos dados que
+               correspondem à expressão sintética
+                                                  sg_unidade_federacao
+               (Forma curta e abreviada)
+sg -sigla
+               geralmente de nomes de Unidades
+                                                  sg_moeda
+               Geográficas, Unidade Monetárias,
+               Locais, etc.
+               Atribuída aos dados numéricos que
+                                                 vl_total_transacao
+               expressam a medida de algo em
+               dinheiro, preço ou valia.
+vl - valor                                       vl_faturamento_ec
+               Representa a qualidade pela qual
+               uma pessoa ou objeto é estimável
+                                                 vl_taxa_transacao
+               em maior ou menor grau.
+                                                 mulitmidia_foto_funcionario
+               Atribuída aos dados destinados ao
+mu -
+               armazenamento de imagens, sons e multimidia_video_reuniao_planning
+multimidia
+               outros tipos de mídias.
+                                                 multimidia_imagem_documento
+
+
+Exceções
+Exceções aos padrões e regras contidos neste procedimento poderão ser aceitos para atender à
+alguma necessidade específica, mas sempre deverão ser analisadas e aprovadas pela Área de
+Arquitetura e Governança de Dados.
+
+As exceções a este procedimento devem ser avaliadas pela área responsável pelo documento e
+submetidas à aprovação da Diretoria Executiva.
+
+
+Vigência
+Este procedimento entra em vigor a partir da data de divulgação, revogando toda e qualquer
+disposição em contrário.
+A revisão deste documento ocorrerá anualmente a partir da data de divulgação ou qualquer
+alteração significativa.
+
+
+Controle e Histórico de Versões
+Data             Versão Sumário
+                          Criação do procedimento Padrões de Nomenclatura para Estrutura de
+Setembro/2022 1.0
+                          Dados (Ambiente Analítico – Data Lake – AWS)
+
+
+Aprovações
+Testemunhas:
+
+MAURO ANDRE MENEGUIN
+
+Especialista de Arquitetura de TI
+
+
+
+ILAIRTON FERNANDES DA SILVA JUNIOR
+
+Analista de Governança de TI
+
+
+
+
+Responsáveis:
+
+DEBORA ALBUQUERQUE E SILVA
+
+Superintendente de TI
+
+
+
+DAIANA LEITE SANTANA BASTOS
+
+Gerente de Governança de TI
+

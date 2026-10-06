@@ -1,0 +1,173 @@
+# Modelo de data contract (ODCS v3.2.0) — tabela cred_final (exemplos/cred_final.sql)
+#
+# Tudo que dá para tirar do DDL já está preenchido. Troque os PREENCHER (servidor, secret, bucket):
+# enquanto existirem, o framework avisa e o orquestrador não executa.
+# Explicação de cada campo: ingestion-orchestrator/contracts/template.odcs.yaml
+#
+# Gerar:  dl-gen generate --contract exemplos\cred_final.odcs.yaml
+
+apiVersion: v3.2.0
+kind: DataContract
+id: 3b8e6f0a-2c4d-4e1f-9a7b-5d6c8e9f0a1b
+name: previsao-cred-final
+version: 1.0.0
+status: draft
+domain: credenciamento
+dataProduct: previsao
+
+description:
+  purpose: Previsão final de volume por credenciadora, produto e variante, usada no planejamento comercial.
+  usage: Consultar a previsão por data, credenciadora e produto. A previsão com ajuste de 10% fica em predito_final_10.
+  limitations: Valores previstos (não realizados). Não usar como dado contábil.
+
+tags: [ingestao, previsao, credenciamento]
+
+team:
+  name: engenharia-de-dados
+  members:
+    - username: PREENCHER
+      role: owner
+      dateIn: "2026-10-06"
+
+support:
+  - channel: engenharia-de-dados
+    tool: teams
+
+servers:
+  - server: previsao-dev
+    environment: dev
+    type: postgres
+    host: PREENCHER
+    port: 5432
+    database: PREENCHER
+    schema: public
+    customProperties:
+      - property: secretId
+        value: PREENCHER
+  - server: previsao-prd
+    environment: prd
+    type: postgres
+    host: PREENCHER
+    port: 5432
+    database: PREENCHER
+    schema: public
+    customProperties:
+      - property: secretId
+        value: PREENCHER
+
+schema:
+  - name: cred_final
+    physicalName: public.cred_final
+    physicalType: table
+    businessName: Previsão final por credenciadora
+    description: Previsão final de volume por credenciadora, produto, variante, tipo de pessoa e visão.
+    dataGranularityDescription: Uma linha por credenciadora, produto, variante, tipo de pessoa, visão e data
+    customProperties:
+      - property: loadMode
+        value: incremental
+      - property: rawPartitionColumn
+        value: dt_ingestao
+      - property: rawPath
+        value: s3://PREENCHER-{env}-raw/previsao/cred_final/
+      - property: rawDatabase
+        value: raw_previsao
+    properties:
+      - name: cd_credenciadora
+        logicalType: integer
+        physicalType: INTEGER
+        primaryKey: true
+        primaryKeyPosition: 1
+        required: true
+        description: Código da credenciadora
+        classification: internal
+      - name: nm_credenciadora
+        logicalType: string
+        physicalType: VARCHAR(255)
+        required: true
+        description: Nome da credenciadora
+        classification: internal
+      - name: nm_produto
+        logicalType: string
+        physicalType: VARCHAR(100)
+        primaryKey: true
+        primaryKeyPosition: 2
+        required: true
+        description: Nome do produto
+        classification: internal
+      - name: nm_variante
+        logicalType: string
+        physicalType: VARCHAR(100)
+        primaryKey: true
+        primaryKeyPosition: 3
+        required: true
+        description: Nome da variante do produto
+        classification: internal
+      - name: tipo_pessoa
+        logicalType: string
+        physicalType: VARCHAR(10)
+        primaryKey: true
+        primaryKeyPosition: 4
+        required: true
+        description: Tipo de pessoa (física ou jurídica)
+        classification: internal
+        customProperties:
+          - property: stagingName
+            value: cd_tipo_pessoa
+      - name: visao
+        logicalType: string
+        physicalType: VARCHAR(50)
+        primaryKey: true
+        primaryKeyPosition: 5
+        required: true
+        description: Visão da previsão
+        classification: internal
+        customProperties:
+          - property: stagingName
+            value: nm_visao
+      - name: data
+        logicalType: date
+        physicalType: DATE
+        primaryKey: true
+        primaryKeyPosition: 6
+        required: true
+        partitioned: true
+        partitionKeyPosition: 1
+        description: Data de referência da previsão
+        classification: internal
+        customProperties:
+          - property: stagingName
+            value: dt_referencia
+      - name: predito_final
+        logicalType: number
+        physicalType: DOUBLE PRECISION
+        description: Valor previsto final
+        classification: internal
+        customProperties:
+          - property: stagingName
+            value: vl_predito_final
+      - name: predito_final_10
+        logicalType: number
+        physicalType: DOUBLE PRECISION
+        description: Valor previsto final com ajuste de 10%
+        classification: internal
+        customProperties:
+          - property: stagingName
+            value: vl_predito_final_ajuste_10
+    quality:
+      - metric: duplicateValues
+        mustBe: 0
+        severity: error
+        description: Uma previsão por chave
+        arguments:
+          properties: [cd_credenciadora, nm_produto, nm_variante, tipo_pessoa, visao, data]
+      - metric: rowCount
+        mustBeGreaterThan: 0
+        severity: warning
+        description: A carga do dia não deve vir vazia
+
+slaProperties:
+  - property: frequency
+    value: 1
+    unit: d
+
+contractCreatedTs: "2026-10-06T00:00:00+00:00"
