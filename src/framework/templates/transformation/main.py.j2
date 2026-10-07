@@ -1,0 +1,65 @@
+r"""Entry point da transformacao {{ dataset }}.
+
+Le os parametros (--chave valor), seleciona o processor pelo --table_name e reporta
+erros classificados para o SQS (--sqs_arn, opcional).
+
+Execucao:
+    zip -r datalake.zip datalake
+    spark-submit --packages io.delta:delta-spark_2.12:3.3.0 --py-files datalake.zip main.py \
+        --table_name <tabela> --data_source s3://<raw>/... --output_uri s3://<bucket>/<team>/<dataset>/<tabela>
+"""
+
+from __future__ import annotations
+
+import sys
+
+from pyspark.sql import SparkSession
+
+from datalake.error import spark_error_handler
+{% for m in models %}
+from datalake.processor.{{ m.package }} import {{ m.package }}_processor
+from datalake.processor.{{ m.package }}.{{ m.package }}_model import {{ m.model }}
+{% endfor %}
+from datalake.utils import args_parser, sqs_utils
+
+PROCESSORS = {
+{% for m in models %}
+    {{ m.model }}.table_name: {{ m.package }}_processor.process,
+{% endfor %}
+}
+
+
+def main(argv: list[str]) -> None:
+    params = args_parser.parse(argv)
+    table_name = params.get("table_name")
+    if not table_name:
+        raise ValueError("Parametro obrigatorio ausente: --table_name")
+
+    spark = (SparkSession.builder
+             .appName(f"{{ dataset }}-transformation-{table_name}")
+             # Mesmo timezone da ingestao (UTC): evita drift no parsing de timestamps com sufixo "Z"
+             .config("spark.sql.session.timeZone", "UTC")
+             .enableHiveSupport()
+             .getOrCreate())
+
+    def run() -> None:
+        processor = PROCESSORS.get(table_name)
+        if processor is None:
+            raise ValueError(f"Unsupported table_name: {table_name}")
+        processor(spark, params)
+
+    _, error = spark_error_handler.run(run)
+    if error is not None:
+        print(f"[{error.category.name}] {error.suggested_action}")
+        sqs_arn = params.get("sqs_arn")
+        if sqs_arn:
+            sqs_utils.send_error(sqs_arn, error, {
+                "table_name": table_name,
+                "data_source": params.get("data_source", ""),
+                "output_uri": params.get("output_uri", ""),
+            })
+        raise error.original_error
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -155,7 +155,7 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
     Args:
         ddl: String com o DDL (CREATE TABLE ...).
         dataset: Nome do dataset (ex: vendas).
-        type_map: Mapeamento tipo SQL → tipo Scala (planilha Tipagem.xlsx).
+        type_map: Mapeamento tipo SQL → tipo Spark (planilha Tipagem.xlsx).
 
     Returns:
         SchemaInfo com table_name, source_table, fields, pk_fields, etc.

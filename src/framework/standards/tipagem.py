@@ -1,4 +1,4 @@
-"""Tipagem oficial: tipo SQL de origem → tipo Spark/Scala.
+"""Tipagem oficial: tipo SQL de origem → tipo Spark (PySpark).
 
 Camadas (a última prevalece):
   1. SPARK_TYPE_MAP do parser (tipos não cobertos pela tabela oficial: bigint, text, double...)
@@ -71,7 +71,7 @@ def normalize_sql_type(raw_type: str) -> str:
 
 
 def load_type_map(path: str | Path) -> dict[str, str]:
-    """Lê a planilha e retorna {tipo_sql_normalizado: TipoScala}.
+    """Lê a planilha e retorna {tipo_sql_normalizado: TipoSpark}.
 
     Cabeçalho esperado: "Tipo Origem" / "Tipo Final" (também aceita "Tipo SQL" / "Tipo Scala").
     Sem cabeçalho reconhecível, usa as duas primeiras colunas.
@@ -102,13 +102,13 @@ def load_type_map(path: str | Path) -> dict[str, str]:
         if len(row) <= max(src, dst) or row[src] is None or row[dst] is None:
             continue
         sql_type = normalize_sql_type(str(row[src]))
-        scala_type = str(row[dst]).strip().removesuffix("()")
-        if not sql_type or not scala_type:
+        spark_type = str(row[dst]).strip().removesuffix("()")
+        if not sql_type or not spark_type:
             continue
-        if not is_valid_spark_type(scala_type):
-            invalid.append(f"{row[src]} → {scala_type}")
+        if not is_valid_spark_type(spark_type):
+            invalid.append(f"{row[src]} → {spark_type}")
             continue
-        type_map[sql_type] = scala_type
+        type_map[sql_type] = spark_type
 
     if invalid:
         raise ValueError(f"Tipos inválidos em {path} (permitidos: {', '.join(SPARK_TYPES)}): {'; '.join(invalid)}")

@@ -1,0 +1,82 @@
+"""Processor da tabela {{ table_name }} (tabela simples: fonte unica, sem join fato-a-fato).
+
+Fluxo canonico: params → run timestamp → read → rename → select unico → particao
+→ enrichments → dedup → rastreabilidade → persist → Delta → Hive → particoes.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from pyspark import StorageLevel
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, date_format, lit
+from pyspark.sql.types import StringType, StructField, StructType
+
+from datalake.processor.{{ package }}.{{ package }}_model import {{ model }}
+from datalake.utils import apply_enrichment, dataframe_utils, delta_write_pattern, hive_table_manager
+from datalake.utils.file_utils import derive_base_path_from_table_uri
+from datalake.utils.transform_column import transform_column
+
+
+def process(spark: SparkSession, params: dict[str, str]) -> None:
+    model = {{ model }}
+
+    # 1. Parametros (core obrigatorios + opcionais com fallback)
+    data_source = params["data_source"]
+    output_path = params["output_uri"]
+    database = params.get("database") or model.database_name
+    full_table_name = f"{database}.{model.table_name}"
+    s3_base_path = params.get("s3_base_path") or derive_base_path_from_table_uri(output_path)
+
+    # 2. Run timestamp resolvido uma vez no driver (UTC)
+    run_timestamp = datetime.now(timezone.utc)
+    run_date_yyyymmdd = run_timestamp.strftime("%Y%m%d")
+
+    # 3. Leitura da raw (JSON da ingestao) com schema StringType
+    read_schema = StructType([StructField(c, StringType(), True) for c in model.source_schema()])
+    raw_df = spark.read.schema(read_schema).json(data_source)
+
+    # 4. Rename raw → staging
+    renamed_df = dataframe_utils.rename_columns(raw_df, model.raw_to_staging_map())
+
+    # 6. Transformacoes em um unico select
+    transforms = {f.target_name: transform_column(f) for f in model.fields}
+    transformed_df = renamed_df.select([transforms.get(c, col(c)).alias(c) for c in renamed_df.columns])
+
+    # 7. Colunas de particao
+    partitioned_df = (transformed_df
+{% for p in partitions %}
+        .withColumn("{{ p.name }}", {{ p.expression }})
+{% endfor %}
+    )
+
+    # 8. Enrichments (broadcast com dimensoes)
+    enriched_df = apply_enrichment.apply_all(partitioned_df, model.enrichments, s3_base_path)
+
+    # 10. Deduplicacao deterministica (mais recente por chave de merge)
+    dedup_df = delta_write_pattern.dedup(enriched_df, model.merge_keys, model.timestamp_field)
+
+    # 11. Rastreabilidade
+    trace_df = dataframe_utils.add_traceability_fields(dedup_df, run_timestamp)
+
+    # 12. Persist antes do MERGE (le a origem duas vezes)
+    trace_df.persist(StorageLevel.MEMORY_AND_DISK)
+
+    try:
+        # 13. Delta: overwrite na primeira carga, MERGE null-safe nas seguintes
+        merge_conditions = {k: k for k in model.merge_keys}
+        delta_write_pattern.save(spark, trace_df, output_path, merge_conditions, model.partition_columns,
+                                 model.avg_row_size)
+
+        # 14. Tabela Hive/Athena + schema evolution + particoes em lote
+        column_comments = model.column_comments()
+        hive_table_manager.create_table(spark, full_table_name, trace_df.schema, model.partition_columns,
+                                        output_path, model.table_comment, column_comments, database)
+        hive_table_manager.evolve_schema(
+            spark, full_table_name,
+            [f for f in trace_df.schema.fields if f.name not in model.partition_columns], column_comments)
+        hive_table_manager.register_partitions(spark, full_table_name, trace_df, model.partition_columns)
+    finally:
+        # 15. Libera o cache
+        trace_df.unpersist()

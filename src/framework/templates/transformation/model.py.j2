@@ -1,0 +1,39 @@
+"""Modelo da tabela {{ table_name }} (SDD: docs_sdd/{{ table_name }}_sdd_doc.md).
+
+Objeto de configuracao puro — sem SparkSession, sem I/O.
+"""
+
+from pyspark.sql.types import {{ type_imports | join(", ") }}
+
+from datalake.utils.field_spec import FieldSpec
+from datalake.utils.table_model import TableModel
+
+
+class {{ model }}(TableModel):
+    table_name = "{{ table_name }}"
+    database_name = "{{ database }}"
+    table_comment = "{{ table_comment }}"
+
+    fields = [
+{% for f in fields %}
+        FieldSpec({{ f.args }}),
+{% endfor %}
+    ]
+
+    merge_keys = [{% for k in merge_keys %}"{{ k }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+
+    partition_columns = [{% for p in partitions %}"{{ p.name }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+
+    #: Coluna usada na deduplicacao: mantem o registro mais recente por chave de merge.
+    timestamp_field = "{{ timestamp_field }}"
+
+    extra_column_comments = {
+{% for p in partitions %}
+        "{{ p.name }}": "{{ p.comment }}",
+{% endfor %}
+        "dh_criacao_registro": "Data e horario da criacao do registro na camada.",
+        "dh_atualizacao_registro": "Data e horario da ultima atualizacao do registro na camada.",
+    }
+
+    #: Tamanho medio estimado de uma linha (bytes), usado no file sizing da primeira carga.
+    avg_row_size = {{ avg_row_size }}

@@ -1,7 +1,7 @@
 """Agente de Nomenclatura — aplica o padrão de nomenclatura aos campos do DDL.
 
 Para cada campo gera stagingField (natureza_termo_qualificadores, em português),
-comment e, por consequência, o nome da variável Scala (camelCase do stagingField).
+e comment, usados no FieldSpec do model PySpark.
 O dataType vem da planilha Tipagem.xlsx / mapeamento do parser — não do LLM.
 
 Subgrafo LangGraph:
@@ -60,10 +60,10 @@ class NamingProposal(BaseModel):
 
 
 SYSTEM_PROMPT = """Você é especialista em Governança de Dados da empresa e gera declarações de campos \
-ModelField em Scala seguindo os padrões de nomenclatura e tipagem do Data Lake.
+FieldSpec em PySpark seguindo os padrões de nomenclatura e tipagem do Data Lake.
 
 Formato final de cada campo (gerado pelo framework a partir da sua resposta):
-final val nomeCampoCamelCase = ModelField(rawField = "nome_original", stagingField = "nome_padronizado", dataType = TipoScala, comment = "Descrição clara e objetiva do campo")
+FieldSpec("nome_original", "nome_padronizado", TipoSpark(), "Descrição clara e objetiva do campo")
 
 Regras de geração:
 1. rawField: utilize o nome original do campo conforme aparece no DDL, sem alterações.
@@ -78,10 +78,9 @@ Regras de geração:
    - Se o campo original já estiver no padrão (ex: cd_credenciadora), mantenha-o.
    - Nunca use os nomes reservados (colunas de controle já existentes): {reservados}.
    - Cada stagingField deve ser único na tabela.
-3. final val: é o stagingField em camelCase (calculado pelo framework — não precisa enviar).
-4. dataType: é mapeado pelo framework a partir da planilha Tipagem.xlsx — use-o apenas para escolher a natureza
+3. dataType: é mapeado pelo framework a partir da planilha Tipagem.xlsx — use-o apenas para escolher a natureza
    (ex: TimestampType → dh, DateType → dt, BooleanType → in, valores monetários → vl).
-5. comment: descrição clara e objetiva com base no nome do campo traduzido, em português com acentuação correta.
+4. comment: descrição clara e objetiva com base no nome do campo traduzido, em português com acentuação correta.
    Ex: nm_usuario → "Nome do usuário." Se o DDL trouxer comentário, use-o como base.
 
 Quadro de Naturezas:

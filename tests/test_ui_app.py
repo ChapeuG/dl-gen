@@ -27,10 +27,7 @@ def _text(at: AppTest, label: str):
     return next(t for t in at.text_input if t.label.startswith(label))
 
 
-def test_full_flow(tmp_path, monkeypatch):
-    from framework.agents import validator
-    monkeypatch.setattr(validator.shutil, "which", lambda name: None)  # sem sbt
-
+def test_full_flow(tmp_path):
     at = AppTest.from_file(APP, default_timeout=60).run()
     assert not at.exception
     assert "Data Contract Studio" in at.title[0].value
@@ -70,7 +67,7 @@ def test_full_flow(tmp_path, monkeypatch):
     contract = (tmp_path / "contracts" / "vendas" / "cliente.odcs.yaml").read_text(encoding="utf-8")
     assert "nm_cliente" in contract  # a edição da etapa 2 foi para o contrato
     assert (tmp_path / "ingestion-config" / "vendas" / "cliente.ingestion.yml").exists()
-    assert (tmp_path / "vendas-transformation" / "build.sbt").exists()
+    assert (tmp_path / "vendas-transformation" / "pyproject.toml").exists()
 
 
 def test_validation_blocks_generation_without_secret():

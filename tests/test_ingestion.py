@@ -113,12 +113,12 @@ def test_ingestion_encrypts_configured_columns():
 
 def test_encrypted_column_is_string_in_transformation():
     state = _run(encrypt_columns=["nu_cpf"])
-    model = _file(transform_gen_agent(state)["transform_files"], "ClienteModel.scala")
+    model = _file(transform_gen_agent(state)["transform_files"], "cliente_model.py")
     line = next(line for line in model.splitlines() if 'FieldSpec("nu_cpf"' in line)
     # Já chega criptografado (base64): StringType, sem transformação
-    assert ", StringType, " in line
-    assert "encrypted = true" in line
-    assert "transformation = None" in line
+    assert ", StringType(), " in line
+    assert "encrypted=True" in line
+    assert "transformation=None" in line
 
 
 def test_encrypt_unknown_column_fails():
@@ -151,7 +151,7 @@ def test_oracle_source():
     assert _yml(state)["source"]["type"] == "oracle"
 
     # A ingestão grava as colunas em minúsculo; a transformação lê em minúsculo
-    model_t = _file(transform_gen_agent(state)["transform_files"], "LancamentoModel.scala")
+    model_t = _file(transform_gen_agent(state)["transform_files"], "lancamento_model.py")
     assert 'FieldSpec("cd_lncm", ' in model_t
 
 
@@ -182,7 +182,7 @@ def test_partition_col_drives_ingestion_and_transformation():
     assert load["parallel"]["column"] == "DH_INCL_RGST"
 
     transform = transform_gen_agent(state)["transform_files"]
-    proc_t = _file(transform, "TbclcrLncmRecbProcessor.scala")
+    proc_t = _file(transform, "tbclcr_lncm_recb_processor.py")
     staging = next(f["staging_field"] for f in state["schema"]["fields"] if f["raw_field"] == "DH_INCL_RGST")
     partition = f"dt_{staging.split('_', 1)[1]}_particao"
     assert f'.withColumn("{partition}", date_format(col("{staging}"), "yyyyMMdd"))' in proc_t
@@ -213,8 +213,8 @@ CREATE TABLE public.cred_final (
 
 def _merge_conditions(state) -> list[str]:
     import re
-    model = _file(transform_gen_agent(state)["transform_files"], "CredFinalModel.scala")
-    line = next(line for line in model.splitlines() if "override val mergeKeys" in line)
+    model = _file(transform_gen_agent(state)["transform_files"], "cred_final_model.py")
+    line = next(line for line in model.splitlines() if line.strip().startswith("merge_keys = "))
     return re.findall(r'"([^"]+)"', line)
 
 
@@ -253,25 +253,25 @@ def test_repo_files_of_transformation():
     pipeline = _file(transform, ".github/workflows/pipeline.yml")
     assert pipeline.count("git push --mirror codecommit::us-east-2://vendas-transf") == 3
     assert "github.com/project-slug: acme/vendas-transformation" in _file(transform, "catalog-info.yaml")
-    assert "target/" in _file(transform, ".gitignore")
+    assert "__pycache__/" in _file(transform, ".gitignore")
 
 
-def test_validator_writes_yml_and_project_with_git(tmp_path, monkeypatch):
+def test_validator_writes_yml_and_project_with_git(tmp_path):
     import subprocess
     from framework.agents import validator
 
-    monkeypatch.setattr(validator.shutil, "which", lambda name: None)  # sem sbt
     state = _run()
     state.update(input_gen_agent(state))
     state.update(transform_gen_agent(state))
     state.update({"output_dir": str(tmp_path), "dry_run": False})
     result = validator.validator_agent(state)
 
-    assert result["validation_skipped"] == "sbt não encontrado no PATH"
+    assert result["validation_skipped"] == ""
+    assert result["transform_compiled"] and result["compile_errors"] == []
     assert (tmp_path / "ingestion-config" / "vendas" / "cliente.ingestion.yml").exists()
     assert not (tmp_path / "ingestion-config" / ".git").exists()  # o yml não vira repositório
     project = tmp_path / "vendas-transformation"
-    assert (project / "project" / "plugins.sbt").exists()
+    assert (project / "pyproject.toml").exists() and (project / "main.py").exists()
     remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=project, capture_output=True, text=True)
     assert remote.stdout.strip() == "https://github.com/datalake-org/vendas-transformation.git"
     branch = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"], cwd=project, capture_output=True, text=True)
@@ -293,32 +293,42 @@ def test_dry_run_writes_nothing(tmp_path):
 def test_transformation_follows_skills_structure():
     state = _run(merge_keys=["id"])
     files = transform_gen_agent(state)["transform_files"]
-    base = "vendas-transformation/src/main/scala/br/com/datalake/"
-    for rel in ("Main.scala", "error/SparkErrorHandler.scala", "processor/cliente/ClienteModel.scala",
-                "processor/cliente/ClienteProcessor.scala", "utils/TableModel.scala", "utils/FieldSpec.scala",
-                "utils/TransformColumn.scala", "utils/DeltaWritePattern.scala", "utils/HiveTableManager.scala",
-                "utils/DataFrameUtils.scala", "utils/FileUtils.scala", "utils/Enrichment.scala"):
+    base = "vendas-transformation/datalake/"
+    for rel in ("__init__.py", "error/spark_error_handler.py", "processor/cliente/__init__.py",
+                "processor/cliente/cliente_model.py", "processor/cliente/cliente_processor.py",
+                "utils/table_model.py", "utils/field_spec.py", "utils/transform_column.py",
+                "utils/delta_write_pattern.py", "utils/hive_table_manager.py", "utils/dataframe_utils.py",
+                "utils/file_utils.py", "utils/enrichment.py"):
         assert base + rel in files, rel
     assert "vendas-transformation/docs_sdd/cliente_sdd_doc.md" in files
+    assert "vendas-transformation/pyproject.toml" in files
+    assert not any(k.endswith((".scala", ".sbt")) for k in files)
 
-    main = files[base + "Main.scala"]
-    assert "case ClienteModel.tableName => ClienteProcessor.process(params)" in main
+    # Todo .py gerado é Python válido
+    for path, content in files.items():
+        if path.endswith(".py"):
+            compile(content, path, "exec")
 
-    processor = files[base + "processor/cliente/ClienteProcessor.scala"]
-    order = ["DataFrameUtils.renameColumns", "TransformColumn(f)", "ApplyEnrichment.applyAll",
-             "DeltaWritePattern.dedup", "addTraceabilityFields", "persist(StorageLevel.MEMORY_AND_DISK)",
-             "DeltaWritePattern.save", "HiveTableManager.createTable", "registerPartitions", "unpersist()"]
+    main = files["vendas-transformation/main.py"]
+    assert "from datalake.processor.cliente import cliente_processor" in main
+    assert "ClienteModel.table_name: cliente_processor.process," in main
+
+    processor = files[base + "processor/cliente/cliente_processor.py"]
+    order = ["dataframe_utils.rename_columns", "transform_column(f)", "apply_enrichment.apply_all",
+             "delta_write_pattern.dedup", "add_traceability_fields", "persist(StorageLevel.MEMORY_AND_DISK)",
+             "delta_write_pattern.save", "hive_table_manager.create_table", "register_partitions", "unpersist()"]
     positions = [processor.index(step) for step in order]
     assert positions == sorted(positions)
-    assert '.withColumn("dt_atualizacao_registro_particao", lit(runDateYyyymmdd))' in processor
+    assert '.withColumn("dt_atualizacao_registro_particao", lit(run_date_yyyymmdd))' in processor
 
-    model = files[base + "processor/cliente/ClienteModel.scala"]
+    model = files[base + "processor/cliente/cliente_model.py"]
     by_raw = {f["raw_field"]: f for f in state["schema"]["fields"]}
     created = by_raw["created_at"]["staging_field"]
-    # Timestamp: normalizeTimestamp + to_timestamp (default); boolean e decimal com cast
-    assert f'FieldSpec("created_at", "{created}", TimestampType' in model
-    assert 'DecimalType(12,2)' in model
-    assert 'FieldSpec("@timestamp", "dh_criacao_data_lake", TimestampType' in model
+    # Timestamp: normalize_timestamp + to_timestamp (default); boolean e decimal com cast
+    assert "class ClienteModel(TableModel):" in model
+    assert f'FieldSpec("created_at", "{created}", TimestampType()' in model
+    assert 'DecimalType(12, 2)' in model
+    assert 'FieldSpec("@timestamp", "dh_criacao_data_lake", TimestampType()' in model
 
     sdd = files["vendas-transformation/docs_sdd/cliente_sdd_doc.md"]
     for section in ("## 1. Identificação", "## 5. Campos Aninhados", "## 10. Escrita e Persistência"):
@@ -343,8 +353,40 @@ def test_naming_file_overrides_transformation(tmp_path):
     by_raw["data"]["source_format"] = "yyyyMMdd"
     path.write_text(json.dumps(data), encoding="utf-8")
 
-    model = _file(transform_gen_agent(_run(DDL_CRED, naming_dir=str(tmp_path)))["transform_files"], "CredFinalModel.scala")
+    model = _file(transform_gen_agent(_run(DDL_CRED, naming_dir=str(tmp_path)))["transform_files"], "cred_final_model.py")
     produto = next(line for line in model.splitlines() if 'FieldSpec("nm_produto"' in line)
     data_line = next(line for line in model.splitlines() if 'FieldSpec("data"' in line)
-    assert "transformation = None" in produto
-    assert 'sourceFormat = Some("yyyyMMdd"), transformation = Some("format")' in data_line
+    assert "transformation=None" in produto
+    assert 'source_format="yyyyMMdd", transformation="format"' in data_line
+
+
+def test_spark_types_become_pyspark_constructors():
+    from framework.agents.transform_gen import _package, _py_type
+    assert _py_type("StringType") == "StringType()"
+    assert _py_type("DecimalType(18,0)") == "DecimalType(18, 0)"
+    assert _py_type("MapType(StringType,ArrayType(IntegerType))") == "MapType(StringType(), ArrayType(IntegerType()))"
+    assert _package("class") == "class_" and _package("2024_vendas") == "t_2024_vendas"
+
+
+def test_append_registers_every_table_in_main():
+    first = transform_gen_agent(_run(merge_keys=["id"]))["transform_files"]
+    state = _run(DDL_CRED, merge_keys=["cd_credenciadora"])
+    state["transform_files"] = first
+    files = transform_gen_agent(state)["transform_files"]
+    main = files["vendas-transformation/main.py"]
+    assert "ClienteModel.table_name: cliente_processor.process," in main
+    assert "CredFinalModel.table_name: cred_final_processor.process," in main
+    compile(main, "main.py", "exec")
+
+
+def test_validator_reports_python_syntax_errors(tmp_path):
+    from framework.agents import validator
+
+    state = _run(merge_keys=["id"])
+    files = transform_gen_agent(state)["transform_files"]
+    files["vendas-transformation/main.py"] += "\ndef quebrado(:\n"
+    state.update({"transform_files": files, "output_dir": str(tmp_path), "dry_run": False})
+    result = validator.validator_agent(state)
+    assert not result["transform_compiled"]
+    assert result["compile_errors"][0]["file"] == "vendas-transformation/main.py"
+    assert result["compile_errors"][0]["agent_origin"] == "transform_gen"

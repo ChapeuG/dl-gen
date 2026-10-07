@@ -1,3 +1,3 @@
-"""Data Lake Scala Generator — framework que gera projetos Scala de Input e Transformation."""
+"""Data Lake Generator (dl-gen) — gera o ingestion.yml e o projeto PySpark de transformação."""
 
 __version__ = "0.1.0"

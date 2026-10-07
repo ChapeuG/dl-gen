@@ -213,7 +213,7 @@ def test_naming_file_is_source_of_truth(tmp_path, monkeypatch):
     assert {f["raw_field"]: f["staging_field"] for f in saved["fields"]}["status"] == "cd_situacao"
 
 
-# ── Geração Scala ──────────────────────────────────────────────────────
+# ── Geração PySpark ──────────────────────────────────────────────────────
 
 def test_model_field_uses_staging_camel_case(monkeypatch):
     monkeypatch.setattr(naming, "_chat_model_factory", lambda model: FakeChatModel([_proposal(GOOD)]))
@@ -221,17 +221,19 @@ def test_model_field_uses_staging_camel_case(monkeypatch):
     state.update(naming_agent(state))
 
     block = render_field_block(state["schema"])
-    assert ('final val nmFantasia = ModelField(rawField = "trade_name", stagingField = "nm_fantasia", '
-            'dataType = StringType, comment = "Descrição de nm_fantasia.")') in block
+    assert block.startswith("fields = [")
+    assert ('    FieldSpec("trade_name", "nm_fantasia", StringType(), "Descrição de nm_fantasia.", '
+            'transformation="default"),') in block
+    assert "@timestamp" not in block
 
     files = transform_gen_agent({**state, "schema": state["schema"]})["transform_files"]
-    model = next(v for k, v in files.items() if k.endswith("OrganizacaoModel.scala"))
-    processor = next(v for k, v in files.items() if k.endswith("OrganizacaoProcessor.scala"))
-    assert ('FieldSpec("trade_name", "nm_fantasia", StringType, "Descrição de nm_fantasia.", '
-            'transformation = Some("default"))') in model
+    model = next(v for k, v in files.items() if k.endswith("organizacao_model.py"))
+    processor = next(v for k, v in files.items() if k.endswith("organizacao_processor.py"))
+    assert ('FieldSpec("trade_name", "nm_fantasia", StringType(), "Descrição de nm_fantasia.", '
+            'transformation="default")') in model
     # Identificador preserva o case (sem TRIM+UPPER)
-    assert 'FieldSpec("id", "id_organizacao", StringType, "Descrição de id_organizacao.", transformation = None)' in model
-    assert 'override val mergeKeys: Seq[String] = Seq("id_organizacao")' in model
-    assert 'override val tableComment: String = "Cadastro de organizações."' in model
-    assert 'Seq("dt_criacao_particao", "dt_atualizacao_registro_particao")' in model
+    assert 'FieldSpec("id", "id_organizacao", StringType(), "Descrição de id_organizacao.", transformation=None)' in model
+    assert 'merge_keys = ["id_organizacao"]' in model
+    assert 'table_comment = "Cadastro de organizações."' in model
+    assert 'partition_columns = ["dt_criacao_particao", "dt_atualizacao_registro_particao"]' in model
     assert '.withColumn("dt_criacao_particao", date_format(col("dh_criacao"), "yyyyMMdd"))' in processor

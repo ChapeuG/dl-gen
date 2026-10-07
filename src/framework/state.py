@@ -100,7 +100,7 @@ class FrameworkState(TypedDict):
     # Saída do Validator (Agente 4)
     compile_errors: list[CompileError]
     input_compiled: bool
-    validation_skipped: str           # motivo de não ter compilado (dry-run, sbt ausente) ou vazio
+    validation_skipped: str           # motivo de não ter validado (dry-run) ou vazio
     transform_compiled: bool
 
     # Controle de fluxo

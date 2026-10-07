@@ -1,13 +1,11 @@
 """Agente 4 — Validator.
 
-Compila os projetos Scala gerados com sbt compile.
-Não usa LLM — é puramente determinístico (subprocess + sbt).
+Compila (sem executar) os arquivos Python do projeto PySpark gerado e grava tudo em disco.
+Não usa LLM nem depende do Spark instalado — é puramente determinístico.
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from pathlib import Path
 
 from framework.repo import DEFAULT_GITHUB_ORG, github_remote, init_git_repo
@@ -46,61 +44,25 @@ def _write_ingestion_config(files: dict[str, str], base_dir: str) -> None:
         print(f"  📄 Gravado {(Path(base_dir) / rel_path).resolve()}")
 
 
-def _run_sbt_compile(project_dir: Path) -> tuple[bool, list[dict]]:
-    """Roda sbt compile no diretório do projeto.
+def _compile_python(files: dict[str, str]) -> tuple[bool, list[dict]]:
+    """Compila (sem executar) os .py gerados, em memória — pega erros de sintaxe dos templates.
 
     Returns:
         (success, errors) — errors é lista de {file, error, agent_origin}.
     """
-    if not project_dir.exists():
-        return False, [{"file": str(project_dir), "error": "Diretório não existe", "agent_origin": "unknown"}]
-
-    try:
-        result = subprocess.run(
-            ["sbt", "compile"],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min max
-        )
-
-        if result.returncode == 0:
-            return True, []
-
-        # Extrai erros do output
-        errors = []
-        current_file = "unknown"
-        for line in (result.stdout + result.stderr).splitlines():
-            # sbt mostra erros no formato: [error] /path/to/file.scala:line: error message
-            if "[error]" in line and ".scala" in line:
-                parts = line.split()
-                for p in parts:
-                    if ".scala" in p:
-                        current_file = p.split(":")[0]
-                        break
-                errors.append({
-                    "file": current_file,
-                    "error": line.strip(),
-                    "agent_origin": "unknown",
-                })
-
-        if not errors:
-            errors.append({
-                "file": "unknown",
-                "error": result.stderr[:500] if result.stderr else result.stdout[:500],
-                "agent_origin": "unknown",
-            })
-
-        return False, errors
-
-    except subprocess.TimeoutExpired:
-        return False, [{"file": "unknown", "error": "sbt compile timeout (5min)", "agent_origin": "unknown"}]
-    except FileNotFoundError:
-        return False, [{"file": "unknown", "error": "sbt não encontrado no PATH", "agent_origin": "unknown"}]
+    errors = []
+    for rel_path, content in files.items():
+        if not rel_path.endswith(".py"):
+            continue
+        try:
+            compile(content, rel_path, "exec")
+        except SyntaxError as e:
+            errors.append({"file": rel_path, "error": f"linha {e.lineno}: {e.msg}", "agent_origin": "unknown"})
+    return not errors, errors
 
 
 def validator_agent(state: FrameworkState) -> FrameworkState:
-    """Agente 4: valida os projetos Scala gerados com sbt compile."""
+    """Agente 4: valida o projeto PySpark gerado (compilação dos .py) e grava em disco."""
     print("[Agente 4 — Validator] Iniciando validação...")
 
     base_dir = state.get("output_dir") or "."
@@ -111,16 +73,6 @@ def validator_agent(state: FrameworkState) -> FrameworkState:
         print("  Dry-run: nada gravado em disco.")
         return {"compile_errors": [], "input_compiled": True, "transform_compiled": True,
                 "validation_skipped": "dry-run", "status": "validating"}
-
-    # Sem sbt: grava os projetos, mas não compila (evita o loop do Fixer sem motivo)
-    if shutil.which("sbt") is None:
-        if state.get("input_files"):
-            _write_ingestion_config(state["input_files"], base_dir)
-        if state.get("transform_files"):
-            _write_project(state["transform_files"], base_dir, github_org)
-        print("  ⚠️ sbt não encontrado no PATH — projetos gravados sem compilar.")
-        return {"compile_errors": [], "input_compiled": True, "transform_compiled": True,
-                "validation_skipped": "sbt não encontrado no PATH", "status": "validating"}
 
     all_errors: list[dict] = []
 
@@ -133,8 +85,8 @@ def validator_agent(state: FrameworkState) -> FrameworkState:
     transform_compiled = True
     if state.get("transform_files"):
         print("  Compilando projeto de transformação...")
+        transform_compiled, transform_errors = _compile_python(state["transform_files"])
         transform_dir = _write_project(state["transform_files"], base_dir, github_org)
-        transform_compiled, transform_errors = _run_sbt_compile(transform_dir)
 
         for e in transform_errors:
             e["agent_origin"] = "transform_gen"

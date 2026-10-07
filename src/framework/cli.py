@@ -25,7 +25,7 @@ console = Console()
 
 @click.group()
 def main():
-    """Data Lake Generator — gera o ingestion.yml e o projeto Scala de transformação a partir do data contract."""
+    """Data Lake Generator — gera o ingestion.yml e o projeto PySpark de transformação a partir do data contract."""
     pass
 
 
@@ -136,7 +136,7 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
 @main.command()
 @click.option("--sample", "sample_path", required=False, type=click.Path(exists=True), help="Amostra (.csv, .json, .parquet) — ajuda o LLM com exemplos de valores")
 @click.option("--dataset", default=None, help="Nome do dataset (ex: vendas). Default: dataProduct do contrato (obrigatório com --ddl)")
-@click.option("--output", "-o", required=False, type=click.Path(), help="Grava o bloco Scala neste arquivo")
+@click.option("--output", "-o", required=False, type=click.Path(), help="Grava a lista de FieldSpec neste arquivo")
 @click.option("--dry-run", is_flag=True, help="Não grava o arquivo de nomenclatura")
 @naming_options
 def campos(sample_path: str | None, dataset: str | None, output: str | None, dry_run: bool,
@@ -144,7 +144,7 @@ def campos(sample_path: str | None, dataset: str | None, output: str | None, dry
            tipagem_path: str | None, llm_model: str | None, naming_dir: str, encrypt: str,
            source_db: str | None, partition_col: str,
            merge_keys: str, github_org: str, codecommit_transformation: str):
-    """Gera só o object Field (ModelField) no padrão de nomenclatura a partir do DDL."""
+    """Gera só a lista de campos (FieldSpec do model PySpark) no padrão de nomenclatura a partir do DDL."""
     from framework.agents.naming import naming_agent
     from framework.agents.profiler import profiler_agent
     from framework.agents.transform_gen import render_field_block
@@ -156,7 +156,7 @@ def campos(sample_path: str | None, dataset: str | None, output: str | None, dry
     state = {**state, **profiler_agent(state)}
     state = {**state, **naming_agent(state)}
 
-    block = render_field_block(state["schema"])
+    block = render_field_block(state["schema"], state.get("profile"))
     if output:
         Path(output).write_text(block + "\n", encoding="utf-8")
         console.print(f"[green]Bloco gravado em {output}[/green]")
@@ -200,7 +200,7 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
         transform_dir = base_dir / f"{dataset}-transformation"
         if transform_dir.exists():
             existing_files = {}
-            for f in transform_dir.rglob("*.scala"):
+            for f in transform_dir.rglob("*.py"):
                 rel = f.relative_to(base_dir).as_posix()
                 existing_files[rel] = f.read_text(encoding="utf-8")
             initial_state["transform_files"] = existing_files
@@ -211,7 +211,7 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
 
     # Banner
     console.print(Panel.fit(
-        f"[bold]Data Lake Scala Generator[/bold]\n"
+        f"[bold]Data Lake Generator (dl-gen)[/bold]\n"
         f"{'Data contract: ' + contract_path if contract_path else 'DDL: ' + str(ddl)}\n"
         f"Amostra: {sample_path or '(nenhuma)'}\n"
         f"Dataset: {dataset}\n"

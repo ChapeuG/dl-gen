@@ -123,15 +123,12 @@ def test_validation_reports_naming_violation():
     assert naming.level == "error" and "nome" in naming.detail
 
 
-def test_generate_writes_everything(tmp_path, monkeypatch):
-    from framework.agents import validator
-    monkeypatch.setattr(validator.shutil, "which", lambda name: None)  # sem sbt
-
+def test_generate_writes_everything(tmp_path):
     form, servers, rows = _filled()
     r = service.generate(service.build_contract(form, servers, rows), str(tmp_path))
     assert r.contract_path == tmp_path / "contracts" / "vendas" / "cliente.odcs.yaml"
     assert (tmp_path / "ingestion-config" / "vendas" / "cliente.ingestion.yml").exists()
-    assert (tmp_path / "vendas-transformation" / "build.sbt").exists()
+    assert (tmp_path / "vendas-transformation" / "pyproject.toml").exists()
     assert (tmp_path / "naming" / "cliente.json").exists()
     cfg = yaml.safe_load((tmp_path / "ingestion-config" / "vendas" / "cliente.ingestion.yml").read_text(encoding="utf-8"))
     assert cfg["encryption"]["columns"] == ["nu_cpf"]

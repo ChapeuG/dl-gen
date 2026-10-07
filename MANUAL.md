@@ -14,20 +14,20 @@ ao Data Lake:
      ┌──────────┴──────────────┐
      ▼                         ▼
  INGESTÃO                   TRANSFORMAÇÃO
- ingestion.yml              projeto Scala <dataset>-transformation
+ ingestion.yml              projeto PySpark <dataset>-transformation
  (lido pelo orquestrador)   (raw → staging Delta + tabela Hive)
 ```
 
 - **Ingestão:** sai um arquivo `ingestion.yml`, que o projeto
   [`ingestion-orchestrator`](https://github.com/ChapeuG/ingestion-orchestrator) usa para ler a origem e gravar na raw.
-- **Transformação:** sempre sai o projeto Scala `<dataset>-transformation`, no padrão das skills da empresa.
+- **Transformação:** sempre sai o projeto PySpark `<dataset>-transformation`, no padrão das skills de transformação.
 
 ---
 
 ## 1. Instalar (uma vez só)
 
-Precisa de **Python 3.10+**. Para compilar os projetos Scala gerados, também do **sbt** (sem ele os projetos são
-gravados, mas não compilados).
+Precisa de **Python 3.10+**. O framework valida os arquivos `.py` gerados sozinho (não precisa de Spark nem de
+Java instalados para gerar).
 
 ```powershell
 git clone https://github.com/ChapeuG/dl-gen.git
@@ -111,7 +111,7 @@ Sai isto na pasta atual:
 
 ```
 ingestion-config\sakila\actor.ingestion.yml     ← ingestão (para o orquestrador)
-sakila-transformation\                          ← projeto Scala da transformação (já com git init)
+sakila-transformation\                          ← projeto PySpark da transformação (já com git init)
 naming\actor.json                               ← nomes das colunas na staging, para você revisar
 ```
 
@@ -147,8 +147,25 @@ spark-submit ... jobs/main.py --config s3://<bucket>/ingestion-config/sakila/act
 
 ```powershell
 cd sakila-transformation
-sbt compile
 git add . ; git commit -m "Transformação actor" ; git push
+```
+
+Estrutura gerada:
+
+```
+sakila-transformation\
+  main.py                                   ← entry point (--table_name escolhe o processor)
+  pyproject.toml                            ← delta-spark 3.3 + boto3 (Spark 3.5 vem do cluster)
+  datalake\processor\actor\actor_model.py    ← campos (FieldSpec), chave de merge, partições
+  datalake\processor\actor\actor_processor.py← fluxo: leitura → rename → transformação → dedup → Delta → Hive
+  datalake\utils\, datalake\error\           ← utilitários (Delta MERGE, Hive, enrichment, SQS...)
+```
+
+Para rodar no cluster:
+
+```bash
+zip -r datalake.zip datalake
+spark-submit --packages io.delta:delta-spark_2.12:3.3.0 --py-files datalake.zip main.py --table_name actor --data_source s3://<raw>/sakila/actor/ --output_uri s3://<bucket>/<time>/sakila/actor
 ```
 
 O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeCommit), `catalog-info.yaml` e o SDD em
@@ -167,9 +184,9 @@ ingestão nova, prefira o contrato.
 
 **Várias tabelas no mesmo projeto de transformação:** gere a primeira normalmente e as próximas com `--append`.
 
-**Só o bloco de campos (`ModelField`) para colar num Model existente:**
+**Só a lista de campos (`FieldSpec`) para colar num model existente:**
 ```powershell
-dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o Field.scala
+dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o fields.py
 ```
 
 ---
@@ -234,7 +251,7 @@ Regras que o framework aplica sozinho:
 | `dl-gen` não é reconhecido | Rode `pip install -e ".[ui]"` de novo na pasta do framework |
 | `dl-gen ui` diz que falta o Streamlit | `pip install -e ".[ui]"` |
 | `UnicodeEncodeError` no terminal | Rode `$env:PYTHONUTF8 = "1"` no PowerShell antes do comando |
-| `sbt não encontrado` | Os projetos foram gravados, só não compilados. Instale o sbt para compilar |
+| `Transformação falhou` | Um `.py` gerado tem erro de sintaxe (veja o arquivo e a linha no log). Corrija a nomenclatura/contrato e gere de novo |
 | Aviso de `PREENCHER` | Falta um campo obrigatório no contrato. Complete e gere de novo |
 | `O contrato tem N tabelas; informe --table` | Use `--table <nome>` |
 | Nome de coluna ruim | Corrija em `naming\<tabela>.json` (ou `stagingName` no contrato) e gere de novo |

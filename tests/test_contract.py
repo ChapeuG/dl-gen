@@ -188,7 +188,7 @@ def test_ingestion_yml(contract_file):
 def test_transformation_fed_by_contract(contract_file):
     files = transform_gen_agent(_run(_state(contract_file)))["transform_files"]
     assert any(k.startswith("cartoes-transformation/") for k in files)
-    model = next(v for k, v in files.items() if k.endswith("Model.scala") and "Cliente" in k)
+    model = next(v for k, v in files.items() if k.endswith("cliente_model.py"))
     assert "cd_cliente_contrato" in model
 
 

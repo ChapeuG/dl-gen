@@ -142,14 +142,14 @@ def test_transform_gen_agent():
     state = transform_gen_agent(state)
 
     keys = str(state["transform_files"].keys())
-    assert "processor/organizacao/OrganizacaoModel.scala" in keys
-    assert "processor/organizacao/OrganizacaoProcessor.scala" in keys
+    assert "processor/organizacao/organizacao_model.py" in keys
+    assert "processor/organizacao/organizacao_processor.py" in keys
 
     # Verifica se o Model contém os campos do DDL (FieldSpec, padrão das skills)
-    model_content = next(v for k, v in state["transform_files"].items() if k.endswith("OrganizacaoModel.scala"))
+    model_content = next(v for k, v in state["transform_files"].items() if k.endswith("organizacao_model.py"))
     assert "FieldSpec(" in model_content
     assert '"parent_id"' in model_content
     assert '"auth0_org_id"' in model_content
 
     # Verifica se o merge key usa o PK (id) — sem nomenclatura, staging = raw
-    assert 'override val mergeKeys: Seq[String] = Seq("id")' in model_content
+    assert 'merge_keys = ["id"]' in model_content

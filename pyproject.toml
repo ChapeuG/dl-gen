@@ -1,7 +1,7 @@
 [project]
-name = "dl-scala-generator"
+name = "dl-gen"
 version = "0.1.0"
-description = "Gera o ingestion.yml e o projeto Scala de transformação a partir de um data contract (ODCS) ou DDL"
+description = "Gera o ingestion.yml e o projeto PySpark de transformação a partir de um data contract (ODCS) ou DDL"
 requires-python = ">=3.10"
 dependencies = [
     "langchain>=0.3.0",
@@ -34,4 +34,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-framework = ["templates/**/*.j2", "templates/**/*.tpl", "standards/*.txt"]
+framework = ["templates/**/*.j2", "templates/**/*.tpl", "templates/**/*.py","standards/*.txt"]
