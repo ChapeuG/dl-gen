@@ -6,6 +6,8 @@ Executa:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -200,3 +202,16 @@ def test_ddl_input_mode_contrato_marks_placeholders():
     assert "source.servers.prd.secretId" in placeholders(cfg)
     assert "target.partitionColumn" in placeholders(cfg)  # sem default: vem do contrato
     assert cfg["load"]["incrementalColumns"] == ["created_at"]
+
+
+def test_language_from_contract_and_flag(contract_file, tmp_path):
+    import click
+    assert _state(contract_file)["language"] == "pyspark"  # padrão
+    data = yaml.safe_load(Path(contract_file).read_text(encoding="utf-8"))
+    data.setdefault("customProperties", []).append({"property": "transformationLanguage", "value": "scala"})
+    scala_file = tmp_path / "scala.odcs.yaml"
+    scala_file.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert _state(str(scala_file))["language"] == "scala"
+    assert _state(str(scala_file), language="pyspark")["language"] == "pyspark"  # a flag prevalece
+    with pytest.raises(click.UsageError, match="inválida"):
+        _state(contract_file, language="java")

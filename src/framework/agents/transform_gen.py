@@ -1,8 +1,9 @@
 """Agente 3 — Transform Gen.
 
-Gera o projeto PySpark de transformação no padrão heavy-transformation definido
-pelas skills de transformação:
+Gera o projeto de transformação no padrão heavy-transformation definido pelas
+skills de transformação, em PySpark (padrão) ou Scala (state["language"]):
 
+PySpark:
     main.py                               ← --table_name seleciona o processor
     pyproject.toml
     datalake/
@@ -10,7 +11,15 @@ pelas skills de transformação:
       processor/<tabela>/<tabela>_model.py      ← FieldSpec, merge keys, partições
       processor/<tabela>/<tabela>_processor.py  ← fluxo canônico (read → ... → Hive)
       utils/                              ← scripts das skills (1:1)
-    docs_sdd/<tabela>_sdd_doc.md          ← SDD (10 seções)
+
+Scala (sbt):
+    build.sbt, project/
+    src/main/scala/br/com/datalake/
+      Main.scala, error/SparkErrorHandler.scala
+      processor/<tabela>/<Tabela>Model.scala, <Tabela>Processor.scala
+      utils/
+
+Nas duas: docs_sdd/<tabela>_sdd_doc.md    ← SDD (10 seções)
 """
 
 from __future__ import annotations
@@ -23,9 +32,12 @@ from jinja2 import Environment, FileSystemLoader
 
 from framework.repo import DEFAULT_GITHUB_ORG, repo_files
 from framework.state import FrameworkState
+from framework.utils import scala_identifier
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "transformation"
-STATIC_DIR = TEMPLATES_DIR / "static"
+
+LANGUAGES = ("pyspark", "scala")
+DEFAULT_LANGUAGE = "pyspark"
 
 PARTITION_UPDATE = "dt_atualizacao_registro_particao"
 TIMESTAMP_FIELD = "dh_criacao_data_lake"
@@ -49,12 +61,19 @@ def _pascal(name: str) -> str:
     return "".join(p.capitalize() for p in re.split(r"[^A-Za-z0-9]+", name) if p)
 
 
-def _package(table_name: str) -> str:
-    """Nome do pacote Python da tabela (minúsculo, identificador válido)."""
+def resolve_language(language: str | None) -> str:
+    lang = (language or DEFAULT_LANGUAGE).strip().lower()
+    if lang not in LANGUAGES:
+        raise ValueError(f"Linguagem da transformação '{language}' inválida: use {' ou '.join(LANGUAGES)}")
+    return lang
+
+
+def _package(table_name: str, language: str = DEFAULT_LANGUAGE) -> str:
+    """Nome do pacote da tabela (minúsculo, identificador válido)."""
     pkg = re.sub(r"[^a-z0-9_]", "_", table_name.lower())
     if pkg[:1].isdigit():
         return f"t_{pkg}"
-    return f"{pkg}_" if keyword.iskeyword(pkg) else pkg
+    return f"{pkg}_" if language == "pyspark" and keyword.iskeyword(pkg) else pkg
 
 
 def _split_args(args: str) -> list[str]:
@@ -80,7 +99,7 @@ def _py_type(data_type: str) -> str:
     return f"{name.strip()}({', '.join(py_args)})"
 
 
-def _py_str(text: str) -> str:
+def _str_literal(text: str) -> str:
     return (text or "").replace("\\", "\\\\").replace('"', "'")
 
 
@@ -106,7 +125,27 @@ def _default_transformation(f: dict, monetary_raw: set[str]) -> str | None:
     return "default"
 
 
-def _field_specs(schema: dict, profile: dict | None) -> list[dict]:
+def _spec_args(source: str, target: str, data_type: str, comment: str, encrypted: bool,
+               source_format: str, transformation: str | None, language: str) -> str:
+    """Argumentos do FieldSpec na sintaxe da linguagem."""
+    if language == "scala":
+        args = [f'"{source}"', f'"{target}"', data_type, f'"{comment}"']
+        if encrypted:
+            args.append("encrypted = true")
+        if source_format:
+            args.append(f'sourceFormat = Some("{source_format}")')
+        args.append(f'transformation = Some("{transformation}")' if transformation else "transformation = None")
+    else:
+        args = [f'"{source}"', f'"{target}"', _py_type(data_type), f'"{comment}"']
+        if encrypted:
+            args.append("encrypted=True")
+        if source_format:
+            args.append(f'source_format="{source_format}"')
+        args.append(f'transformation="{transformation}"' if transformation else "transformation=None")
+    return ", ".join(args)
+
+
+def _field_specs(schema: dict, profile: dict | None, language: str = DEFAULT_LANGUAGE) -> list[dict]:
     monetary_raw = set(profile.get("monetary_fields", [])) if profile else set()
     specs = []
     for f in schema["fields"]:
@@ -120,13 +159,7 @@ def _field_specs(schema: dict, profile: dict | None) -> list[dict]:
         else:
             transformation = _default_transformation(f, monetary_raw)
 
-        comment = _py_str(f["comment"])
-        args = [f'"{f["raw_field"].lower()}"', f'"{f["staging_field"]}"', _py_type(data_type), f'"{comment}"']
-        if f.get("encrypt"):
-            args.append("encrypted=True")
-        if f.get("source_format"):
-            args.append(f'source_format="{f["source_format"]}"')
-        args.append(f'transformation="{transformation}"' if transformation else "transformation=None")
+        comment = _str_literal(f["comment"])
 
         specs.append({
             "source": f["raw_field"].lower(),  # a ingestão grava as colunas em minúsculo
@@ -136,7 +169,8 @@ def _field_specs(schema: dict, profile: dict | None) -> list[dict]:
             "encrypted": bool(f.get("encrypt")),
             "source_format": f.get("source_format") or "",
             "transformation": transformation,
-            "args": ", ".join(args),
+            "args": _spec_args(f["raw_field"].lower(), f["staging_field"], data_type, comment,
+                               bool(f.get("encrypt")), f.get("source_format") or "", transformation, language),
         })
 
     # Coluna de controle vinda da ingestão ("@timestamp" = CURRENT_TIMESTAMP da query)
@@ -144,8 +178,8 @@ def _field_specs(schema: dict, profile: dict | None) -> list[dict]:
         "source": "@timestamp", "target": TIMESTAMP_FIELD, "data_type": "TimestampType",
         "comment": "Data e horario da criacao do registro no Data Lake.", "encrypted": False,
         "source_format": "", "transformation": "default",
-        "args": f'"@timestamp", "{TIMESTAMP_FIELD}", TimestampType(), '
-                f'"Data e horario da criacao do registro no Data Lake.", transformation="default"',
+        "args": _spec_args("@timestamp", TIMESTAMP_FIELD, "TimestampType",
+                           "Data e horario da criacao do registro no Data Lake.", False, "", "default", language),
     })
     return specs
 
@@ -179,7 +213,7 @@ def _partition_source(schema: dict) -> tuple[dict | None, bool]:
     return (dated[0], True) if dated else (None, False)
 
 
-def _partitions(source: dict | None) -> list[dict]:
+def _partitions(source: dict | None, language: str = DEFAULT_LANGUAGE) -> list[dict]:
     parts = []
     if source:
         term = source["staging_field"].split("_", 1)[1]
@@ -190,7 +224,7 @@ def _partitions(source: dict | None) -> list[dict]:
         })
     parts.append({
         "name": PARTITION_UPDATE,
-        "expression": "lit(run_date_yyyymmdd)",
+        "expression": "lit(runDateYyyymmdd)" if language == "scala" else "lit(run_date_yyyymmdd)",
         "comment": "Data de processamento (yyyyMMdd) - particao de atualizacao.",
     })
     return parts
@@ -204,8 +238,26 @@ def _avg_row_size(specs: list[dict]) -> int:
     return max(size, 64)
 
 
-def render_field_block(schema: dict, profile: dict | None = None) -> str:
-    """Lista `fields` de FieldSpec no formato do model PySpark (comando `campos`)."""
+def render_field_block(schema: dict, profile: dict | None = None, language: str = DEFAULT_LANGUAGE) -> str:
+    """Bloco de campos para colar num model (comando `campos`).
+
+    PySpark: lista `fields` de FieldSpec. Scala: `object Field` no formato ModelField.
+    """
+    if resolve_language(language) == "scala":
+        lines = ["object Field {"]
+        for f in schema["fields"]:
+            comment = _str_literal(f["comment"])
+            data_type = f["data_type"]
+            if f.get("encrypt"):
+                data_type = "StringType"
+                comment = f"{comment.rstrip('.')} (criptografado AES/ECB, base64)."
+            lines.append(
+                f'  final val {scala_identifier(f["staging_field"])} = ModelField(rawField = "{f["raw_field"].lower()}", '
+                f'stagingField = "{f["staging_field"]}", dataType = {data_type}, comment = "{comment}")'
+            )
+        lines.append("}")
+        return "\n".join(lines)
+
     lines = ["fields = ["]
     for spec in _field_specs(schema, profile)[:-1]:  # sem a coluna de controle @timestamp
         lines.append(f"    FieldSpec({spec['args']}),")
@@ -215,30 +267,88 @@ def render_field_block(schema: dict, profile: dict | None = None) -> str:
 
 # ── Agente ─────────────────────────────────────────────────────────────
 
+def _pyspark_files(env: Environment, ctx: dict, project_name: str) -> dict[str, str]:
+    pkg = ctx["package"]
+    code = f"{project_name}/datalake"
+    files = {
+        f"{project_name}/pyproject.toml": env.get_template("pyspark/pyproject.toml.j2").render(**ctx),
+        f"{code}/processor/{pkg}/{pkg}_model.py": env.get_template("pyspark/model.py.j2").render(**ctx),
+        f"{code}/processor/{pkg}/{pkg}_processor.py": env.get_template("pyspark/processor.py.j2").render(**ctx),
+    }
+    for package_dir in ("", "/error", "/utils", "/processor", f"/processor/{pkg}"):
+        files[f"{code}{package_dir}/__init__.py"] = ""
+    static_dir = TEMPLATES_DIR / "pyspark" / "static"
+    for static_file in sorted(static_dir.rglob("*.py")):
+        files[f"{code}/{static_file.relative_to(static_dir).as_posix()}"] = static_file.read_text(encoding="utf-8")
+    return files
+
+
+def _pyspark_main(env: Environment, all_files: dict[str, str], project_name: str, dataset: str) -> tuple[str, list]:
+    path_re = re.compile(r"/processor/([^/]+)/\1_model\.py$")
+    class_re = re.compile(r"^class (\w+)\(TableModel\):", re.MULTILINE)
+    models = []
+    for fp in sorted(all_files):
+        m = path_re.search(fp)
+        cls = class_re.search(all_files[fp]) if m else None
+        if cls:
+            models.append({"package": m.group(1), "model": cls.group(1)})
+    return f"{project_name}/main.py", env.get_template("pyspark/main.py.j2").render(dataset=dataset, models=models), models
+
+
+def _scala_files(env: Environment, ctx: dict, project_name: str) -> dict[str, str]:
+    pkg, model, processor = ctx["package"], ctx["model"], ctx["processor"]
+    scala = f"{project_name}/src/main/scala/br/com/datalake"
+    files = {
+        f"{project_name}/build.sbt": env.get_template("scala/build.sbt.j2").render(**ctx),
+        f"{project_name}/project/plugins.sbt": env.get_template("scala/plugins.sbt.j2").render(),
+        f"{project_name}/project/build.properties": env.get_template("scala/build.properties.j2").render(),
+        f"{scala}/processor/{pkg}/{model}.scala": env.get_template("scala/Model.scala.j2").render(**ctx),
+        f"{scala}/processor/{pkg}/{processor}.scala": env.get_template("scala/Processor.scala.j2").render(**ctx),
+    }
+    static_dir = TEMPLATES_DIR / "scala" / "static"
+    for static_file in sorted(static_dir.rglob("*.scala")):
+        files[f"{scala}/{static_file.relative_to(static_dir).as_posix()}"] = static_file.read_text(encoding="utf-8")
+    return files
+
+
+def _scala_main(env: Environment, all_files: dict[str, str], project_name: str, dataset: str) -> tuple[str, list]:
+    model_re = re.compile(r"/processor/([^/]+)/([A-Za-z0-9]+)Model\.scala$")
+    models = []
+    for fp in sorted(all_files):
+        m = model_re.search(fp)
+        if m:
+            models.append({"package": m.group(1), "model": f"{m.group(2)}Model", "processor": f"{m.group(2)}Processor"})
+    path = f"{project_name}/src/main/scala/br/com/datalake/Main.scala"
+    return path, env.get_template("scala/Main.scala.j2").render(dataset=dataset, models=models), models
+
+
 def transform_gen_agent(state: FrameworkState) -> FrameworkState:
-    """Agente 3: gera o projeto PySpark de transformação (padrão das skills)."""
-    print("[Agente 3 — Transform Gen] Gerando projeto de transformação...")
+    """Agente 3: gera o projeto de transformação (padrão das skills) em PySpark ou Scala."""
+    language = resolve_language(state.get("language"))
+    print(f"[Agente 3 — Transform Gen] Gerando projeto de transformação ({language})...")
 
     schema = state["schema"]
     env = _template_env()
 
     table_name = schema["table_name"]
     dataset = schema["dataset"]
-    pkg = _package(table_name)
+    pkg = _package(table_name, language)
     model = f"{_pascal(table_name)}Model"
+    processor = f"{_pascal(table_name)}Processor" if language == "scala" else f"{pkg}_processor.process"
 
-    specs = _field_specs(schema, state.get("profile"))
+    specs = _field_specs(schema, state.get("profile"), language)
     merge_keys, merge_keys_source = _merge_keys(schema)
     partition_source, partition_inferred = _partition_source(schema)
-    partitions = _partitions(partition_source)
-    table_comment = _py_str(schema.get("table_comment") or f"Tabela {table_name} do dataset {dataset}.")
+    partitions = _partitions(partition_source, language)
+    table_comment = _str_literal(schema.get("table_comment") or f"Tabela {table_name} do dataset {dataset}.")
     avg_row_size = _avg_row_size(specs)
 
     type_imports = sorted({t for spec in specs for t in re.findall(r"\b([A-Z]\w*Type)\(", spec["args"])})
 
     ctx = dict(
-        dataset=dataset, database=dataset, table_name=table_name, table_comment=table_comment,
-        package=pkg, model=model, type_imports=type_imports, fields=specs, merge_keys=merge_keys,
+        language=language, dataset=dataset, database=dataset, table_name=table_name, table_comment=table_comment,
+        package=pkg, model=model, processor=processor, type_imports=type_imports, fields=specs,
+        merge_keys=merge_keys,
         merge_keys_source=merge_keys_source, partitions=partitions, timestamp_field=TIMESTAMP_FIELD,
         avg_row_size=avg_row_size, source_table=schema["source_table"],
         source_db=state.get("source_db") or "postgres",
@@ -249,45 +359,30 @@ def transform_gen_agent(state: FrameworkState) -> FrameworkState:
     )
 
     project_name = f"{dataset}-transformation"
-    code = f"{project_name}/datalake"
+    build_files, build_main = (_scala_files, _scala_main) if language == "scala" else (_pyspark_files, _pyspark_main)
     new_files = {
-        f"{project_name}/pyproject.toml": env.get_template("pyproject.toml.j2").render(dataset=dataset),
         f"{project_name}/docs_sdd/{table_name}_sdd_doc.md": env.get_template("sdd_doc.md.j2").render(**ctx),
-        f"{code}/processor/{pkg}/{pkg}_model.py": env.get_template("model.py.j2").render(**ctx),
-        f"{code}/processor/{pkg}/{pkg}_processor.py": env.get_template("processor.py.j2").render(**ctx),
+        **build_files(env, ctx, project_name),
     }
-    for package_dir in ("", "/error", "/utils", "/processor", f"/processor/{pkg}"):
-        new_files[f"{code}{package_dir}/__init__.py"] = ""
-
-    # Utilitários das skills (cópia 1:1) + error handler
-    for static_file in sorted(STATIC_DIR.rglob("*.py")):
-        rel = static_file.relative_to(STATIC_DIR).as_posix()
-        new_files[f"{code}/{rel}"] = static_file.read_text(encoding="utf-8")
 
     # Arquivos de repositório (pipeline GitHub → CodeCommit, Backstage, .gitignore)
     new_files.update(repo_files(
         project_name,
         codecommit_repo=state.get("codecommit_transformation") or f"{dataset}-transformation",
         github_org=state.get("github_org") or DEFAULT_GITHUB_ORG,
+        language=language,
     ))
 
     # Acumula com arquivos já existentes (--append) — várias tabelas no mesmo projeto
     existing_files = state.get("transform_files", {})
     all_files = {**existing_files, **new_files}
 
-    # main.py com todas as tabelas do projeto
-    path_re = re.compile(r"/processor/([^/]+)/\1_model\.py$")
-    class_re = re.compile(r"^class (\w+)\(TableModel\):", re.MULTILINE)
-    models = []
-    for fp in sorted(all_files):
-        m = path_re.search(fp)
-        cls = class_re.search(all_files[fp]) if m else None
-        if cls:
-            models.append({"package": m.group(1), "model": cls.group(1)})
-    all_files[f"{project_name}/main.py"] = env.get_template("main.py.j2").render(dataset=dataset, models=models)
+    # Entry point com todas as tabelas do projeto
+    main_path, main_content, models = build_main(env, all_files, project_name, dataset)
+    all_files[main_path] = main_content
 
     print(f"  Gerados {len(new_files) + 1} arquivos para {project_name}")
-    print(f"  Model: {model} ({len(specs)} campos) — Processor: {pkg}_processor.process")
+    print(f"  Model: {model} ({len(specs)} campos) — Processor: {processor}")
     print(f"  Merge keys: {merge_keys} ({merge_keys_source})")
     print(f"  Partições: {[p['name'] for p in partitions]}")
     if ctx["cents"]:

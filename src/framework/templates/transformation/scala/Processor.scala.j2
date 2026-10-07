@@ -1,0 +1,85 @@
+package br.com.datalake.processor.{{ package }}
+
+import br.com.datalake.utils._
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions.{col, date_format, lit}
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.storage.StorageLevel
+
+import java.sql.Timestamp
+import java.time.format.DateTimeFormatter
+import java.time.{Instant, ZoneOffset}
+
+/**
+ * Processor da tabela {{ table_name }} (tabela simples: fonte unica, sem join fato-a-fato).
+ * Fluxo canonico: params → run timestamp → read → rename → select unico → particao
+ * → enrichments → dedup → rastreabilidade → persist → Delta → Hive → particoes.
+ */
+object {{ processor }} {
+
+  def process(params: Map[String, String])(implicit spark: SparkSession): Unit = {
+    val model = {{ model }}
+
+    // 1. Parametros (core obrigatorios + opcionais com fallback)
+    val dataSource    = params("data_source")
+    val outputPath    = params("output_uri")
+    val database      = params.getOrElse("database", model.databaseName)
+    val fullTableName = s"$database.${model.tableName}"
+    val s3BasePath    = params.get("s3_base_path").filter(_.nonEmpty)
+      .getOrElse(FileUtils.deriveBasePathFromTableUri(outputPath))
+
+    // 2. Run timestamp resolvido uma vez no driver
+    val runInstant      = Instant.now()
+    val runTimestamp    = Timestamp.from(runInstant)
+    val runDateYyyymmdd = runInstant.atZone(ZoneOffset.UTC).toLocalDate
+      .format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+
+    // 3. Leitura da raw (JSON da ingestao) com schema StringType
+    val readSchema = StructType(model.sourceSchema.map(StructField(_, StringType, nullable = true)))
+    val rawDf = spark.read.schema(readSchema).json(dataSource)
+
+    // 4. Rename raw → staging
+    val renamedDf = DataFrameUtils.renameColumns(rawDf, model.rawToStagingMap)
+
+    // 6. Transformacoes em um unico select
+    val transforms: Map[String, org.apache.spark.sql.Column] =
+      model.fields.map(f => f.targetName -> TransformColumn(f)).toMap
+    val transformedDf = renamedDf.select(
+      renamedDf.columns.map(c => transforms.getOrElse(c, col(c)).as(c)): _*
+    )
+
+    // 7. Colunas de particao
+    val partitionedDf = transformedDf
+{% for p in partitions %}
+      .withColumn("{{ p.name }}", {{ p.expression }})
+{% endfor %}
+
+    // 8. Enrichments (broadcast com dimensoes)
+    val enrichedDf = ApplyEnrichment.applyAll(partitionedDf, model.enrichments, s3BasePath)
+
+    // 10. Deduplicacao deterministica (mais recente por chave de merge)
+    val dedupDf = DeltaWritePattern.dedup(enrichedDf, model.mergeKeys, model.timestampField)
+
+    // 11. Rastreabilidade
+    val traceDf = DataFrameUtils.addTraceabilityFields(dedupDf, runTimestamp)
+
+    // 12. Persist antes do MERGE (le a origem duas vezes)
+    traceDf.persist(StorageLevel.MEMORY_AND_DISK)
+
+    try {
+      // 13. Delta: overwrite na primeira carga, MERGE null-safe nas seguintes
+      val mergeConditions = model.mergeKeys.map(k => k -> k).toMap
+      DeltaWritePattern.save(spark, traceDf, outputPath, mergeConditions, model.partitionColumns, model.avgRowSize)
+
+      // 14. Tabela Hive/Athena + schema evolution + particoes em lote
+      HiveTableManager.createTable(spark, fullTableName, traceDf.schema, model.partitionColumns,
+        outputPath, model.tableComment, model.columnComments, database)
+      HiveTableManager.evolveSchema(spark, fullTableName,
+        traceDf.schema.fields.filterNot(f => model.partitionColumns.contains(f.name)), model.columnComments)
+      HiveTableManager.registerPartitions(spark, fullTableName, traceDf, model.partitionColumns)
+    } finally {
+      // 15. Libera o cache
+      traceDf.unpersist()
+    }
+  }
+}

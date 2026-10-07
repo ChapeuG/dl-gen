@@ -14,6 +14,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from framework.agents.transform_gen import resolve_language
 from framework.graph import build_graph
 from framework.llm import DEFAULT_MODEL_ENV, resolve_model_name
 from framework.parsers.contract_parser import custom_props, load_contract, resolve_table
@@ -25,7 +26,7 @@ console = Console()
 
 @click.group()
 def main():
-    """Data Lake Generator — gera o ingestion.yml e o projeto PySpark de transformação a partir do data contract."""
+    """Data Lake Generator — gera o ingestion.yml e o projeto de transformação (PySpark ou Scala) a partir do data contract."""
     pass
 
 
@@ -41,6 +42,10 @@ def naming_options(f):
                      type=click.Choice(sorted(SOURCES), case_sensitive=False),
                      help="Banco de origem: define a tipagem e o conector do orquestrador. "
                           "Default: servers[].type do contrato, $DL_SOURCE_DB ou postgres")(f)
+    f = click.option("--language", envvar="DL_LANGUAGE", default=None,
+                     type=click.Choice(["pyspark", "scala"], case_sensitive=False),
+                     help="Linguagem do projeto de transformação. "
+                          "Default: transformationLanguage do contrato, $DL_LANGUAGE ou pyspark")(f)
     f = click.option("--codecommit-transformation", default="",
                      help="Repositório CodeCommit do pipeline da transformação. Default: <dataset>-transformation")(f)
     f = click.option("--github-org", default="datalake-org", show_default=True,
@@ -69,7 +74,7 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
                    source_db: str | None = None, partition_col: str = "", merge_keys: str = "",
                    github_org: str = "datalake-org", codecommit_transformation: str = "",
                    contract_path: str | None = None, contract_table: str = "",
-                   contract_text: str = "") -> FrameworkState:
+                   contract_text: str = "", language: str | None = None) -> FrameworkState:
     if contract_path:
         contract_text = Path(contract_path).read_text(encoding="utf-8")
     if bool(ddl) == bool(contract_text):
@@ -90,11 +95,16 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
         if github_org == "datalake-org" and extra.get("githubOrg"):
             github_org = extra["githubOrg"]
         codecommit_transformation = codecommit_transformation or extra.get("codecommitTransformation", "")
+        language = language or extra.get("transformationLanguage")
         contract_table = ct.table["name"]
 
     if not dataset:
         raise click.UsageError("Informe --dataset (com --ddl ele é obrigatório; no contrato vem de dataProduct)")
     source_db = (source_db or "postgres").lower()
+    try:
+        language = resolve_language(language)
+    except ValueError as e:
+        raise click.UsageError(str(e)) from None
 
     return {
         "ddl": Path(ddl).read_text(encoding="utf-8") if ddl else "",
@@ -114,6 +124,7 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
         "merge_keys": merge_key_list,
         "github_org": github_org,
         "codecommit_transformation": codecommit_transformation,
+        "language": language,
         "schema": None,
         "profile": None,
         "naming_source": "",
@@ -136,15 +147,15 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
 @main.command()
 @click.option("--sample", "sample_path", required=False, type=click.Path(exists=True), help="Amostra (.csv, .json, .parquet) — ajuda o LLM com exemplos de valores")
 @click.option("--dataset", default=None, help="Nome do dataset (ex: vendas). Default: dataProduct do contrato (obrigatório com --ddl)")
-@click.option("--output", "-o", required=False, type=click.Path(), help="Grava a lista de FieldSpec neste arquivo")
+@click.option("--output", "-o", required=False, type=click.Path(), help="Grava o bloco de campos neste arquivo")
 @click.option("--dry-run", is_flag=True, help="Não grava o arquivo de nomenclatura")
 @naming_options
 def campos(sample_path: str | None, dataset: str | None, output: str | None, dry_run: bool,
            ddl: str | None, contract_path: str | None, contract_table: str,
            tipagem_path: str | None, llm_model: str | None, naming_dir: str, encrypt: str,
            source_db: str | None, partition_col: str,
-           merge_keys: str, github_org: str, codecommit_transformation: str):
-    """Gera só a lista de campos (FieldSpec do model PySpark) no padrão de nomenclatura a partir do DDL."""
+           merge_keys: str, github_org: str, codecommit_transformation: str, language: str | None):
+    """Gera só o bloco de campos (FieldSpec em PySpark ou ModelField em Scala) a partir do DDL."""
     from framework.agents.naming import naming_agent
     from framework.agents.profiler import profiler_agent
     from framework.agents.transform_gen import render_field_block
@@ -152,11 +163,11 @@ def campos(sample_path: str | None, dataset: str | None, output: str | None, dry
     state = _initial_state(ddl, sample_path, dataset, tipagem_path, llm_model, naming_dir, dry_run, encrypt,
                            source_db, partition_col, merge_keys,
                            github_org, codecommit_transformation,
-                           contract_path, contract_table)
+                           contract_path, contract_table, language=language)
     state = {**state, **profiler_agent(state)}
     state = {**state, **naming_agent(state)}
 
-    block = render_field_block(state["schema"], state.get("profile"))
+    block = render_field_block(state["schema"], state.get("profile"), state["language"])
     if output:
         Path(output).write_text(block + "\n", encoding="utf-8")
         console.print(f"[green]Bloco gravado em {output}[/green]")
@@ -180,14 +191,14 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
              ddl: str | None, contract_path: str | None, contract_table: str,
              tipagem_path: str | None, llm_model: str | None, naming_dir: str, encrypt: str,
              source_db: str | None, partition_col: str,
-             merge_keys: str, github_org: str, codecommit_transformation: str):
+             merge_keys: str, github_org: str, codecommit_transformation: str, language: str | None):
     """Gera o ingestion.yml e o projeto de transformação a partir do data contract ou do DDL."""
 
     # Estado inicial
     initial_state = _initial_state(ddl, sample_path, dataset, tipagem_path, llm_model, naming_dir, dry_run, encrypt,
                                    source_db, partition_col, merge_keys,
                                    github_org, codecommit_transformation,
-                                   contract_path, contract_table)
+                                   contract_path, contract_table, language=language)
     dataset = initial_state["dataset"]
     initial_state["max_iterations"] = max_iterations
     initial_state["skip_input"] = skip_input
@@ -200,7 +211,8 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
         transform_dir = base_dir / f"{dataset}-transformation"
         if transform_dir.exists():
             existing_files = {}
-            for f in transform_dir.rglob("*.py"):
+            pattern = "*.scala" if initial_state["language"] == "scala" else "*.py"
+            for f in transform_dir.rglob(pattern):
                 rel = f.relative_to(base_dir).as_posix()
                 existing_files[rel] = f.read_text(encoding="utf-8")
             initial_state["transform_files"] = existing_files
@@ -215,6 +227,7 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
         f"{'Data contract: ' + contract_path if contract_path else 'DDL: ' + str(ddl)}\n"
         f"Amostra: {sample_path or '(nenhuma)'}\n"
         f"Dataset: {dataset}\n"
+        f"Transformação: {initial_state['language']}\n"
         f"Destino: {output_path}\n"
         f"Max iterações: {max_iterations}\n"
         f"Skip Input: {skip_input}\n"

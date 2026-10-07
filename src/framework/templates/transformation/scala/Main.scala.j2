@@ -1,0 +1,51 @@
+package br.com.datalake
+
+import br.com.datalake.error.SparkErrorHandler
+{% for m in models %}
+import br.com.datalake.processor.{{ m.package }}.{ {{- m.model }}, {{ m.processor -}} }
+{% endfor %}
+import br.com.datalake.utils.{ArgsParser, SqsUtils}
+import org.apache.spark.sql.SparkSession
+
+/**
+ * Entry point: le os parametros (--chave valor), seleciona o processor pelo
+ * --table_name e reporta erros classificados para o SQS (--sqs_arn, opcional).
+ */
+object Main {
+
+  def main(args: Array[String]): Unit = {
+    val params = ArgsParser.parse(args)
+    val tableName = params.getOrElse("table_name",
+      throw new IllegalArgumentException("Parametro obrigatorio ausente: --table_name"))
+
+    implicit val spark: SparkSession = SparkSession.builder()
+      .appName(s"{{ dataset }}-transformation-$tableName")
+      // Mesmo timezone da ingestao (UTC): evita drift no parsing de timestamps com sufixo "Z"
+      .config("spark.sql.session.timeZone", "UTC")
+      .enableHiveSupport()
+      .getOrCreate()
+
+    val result = SparkErrorHandler.run {
+      tableName match {
+{% for m in models %}
+        case {{ m.model }}.tableName => {{ m.processor }}.process(params)
+{% endfor %}
+        case other => throw new IllegalArgumentException(s"Unsupported table_name: $other")
+      }
+    }
+
+    result match {
+      case Right(_) => ()
+      case Left(error) =>
+        println(s"[${error.category.getClass.getSimpleName}] ${error.suggestedAction}")
+        params.get("sqs_arn").filter(_.nonEmpty).foreach { sqsArn =>
+          SqsUtils.sendError(sqsArn, error, Map(
+            "table_name"  -> tableName,
+            "data_source" -> params.getOrElse("data_source", ""),
+            "output_uri"  -> params.getOrElse("output_uri", "")
+          ))
+        }
+        throw error.originalError
+    }
+  }
+}

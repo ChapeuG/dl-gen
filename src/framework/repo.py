@@ -24,7 +24,8 @@ def _env() -> Environment:
     )
 
 
-def repo_files(project_name: str, codecommit_repo: str, github_org: str = DEFAULT_GITHUB_ORG) -> dict[str, str]:
+def repo_files(project_name: str, codecommit_repo: str, github_org: str = DEFAULT_GITHUB_ORG,
+               language: str = "pyspark") -> dict[str, str]:
     """Arquivos de repositório do projeto, com caminho relativo ao diretório pai."""
     env = _env()
     # Pipeline é texto puro (usa ${{ }} do GitHub Actions) — só troca o repositório CodeCommit
@@ -33,7 +34,7 @@ def repo_files(project_name: str, codecommit_repo: str, github_org: str = DEFAUL
         f"{project_name}/.github/workflows/pipeline.yml": pipeline.replace("__CODECOMMIT_REPO__", codecommit_repo),
         f"{project_name}/catalog-info.yaml": env.get_template("catalog-info.yaml.j2").render(
             project_name=project_name, github_org=github_org),
-        f"{project_name}/.gitignore": env.get_template("gitignore.j2").render(),
+        f"{project_name}/.gitignore": env.get_template(f"gitignore-{language}.j2").render(),
     }
 
 

@@ -81,6 +81,7 @@ class FrameworkState(TypedDict):
     partition_col: str                # coluna de partição (filtro incremental, leitura paralela, partição L1)
     merge_keys: list[str]             # colunas (raw) da chave de merge do Delta (--merge-keys)
     github_org: str                   # organização GitHub do remote origin (default: datalake-org)
+    language: str                     # linguagem da transformação: pyspark | scala
     codecommit_transformation: str    # repo CodeCommit do pipeline de transformação (default: <dataset>-transformation)
 
     # Saída do Profiler (Agente 1)
@@ -100,7 +101,7 @@ class FrameworkState(TypedDict):
     # Saída do Validator (Agente 4)
     compile_errors: list[CompileError]
     input_compiled: bool
-    validation_skipped: str           # motivo de não ter validado (dry-run) ou vazio
+    validation_skipped: str           # motivo de não ter validado (dry-run, sbt ausente) ou vazio
     transform_compiled: bool
 
     # Controle de fluxo

@@ -322,6 +322,11 @@ def step_contract():
             field_input("Descrição da tabela", "description", placeholder="Cadastro de clientes...")
         with c2:
             field_input("Dono do dado (usuário)", "owner")
+        if ss.form.get("transformationLanguage") not in service.LANGUAGES:
+            ss.form["transformationLanguage"] = "pyspark"
+        bound(st.radio, "Projeto de transformação", "transformationLanguage", options=service.LANGUAGES,
+              format_func=service.LANGUAGE_LABELS.get, horizontal=True,
+              help="Linguagem do projeto <dataset>-transformation gerado.")
 
     with st.container(border=True):
         st.markdown("##### :material/database: Origem")
@@ -530,11 +535,12 @@ def step_validation():
         with tabs[2]:
             transform = sorted(k for k in v.files if k not in ingestion)
             if transform:
-                model = next((k for k in transform if k.endswith("Model.scala") and "/processor/" in k), None)
+                model = next((k for k in transform if k.endswith(("Model.scala", "_model.py")) and "/processor/" in k),
+                             None)
                 st.caption(f"{len(transform)} arquivos")
                 st.code("\n".join(transform), language="text")
                 if model:
-                    st.code(v.files[model], language="scala")
+                    st.code(v.files[model], language="scala" if model.endswith(".scala") else "python")
             else:
                 st.caption("Disponível depois de corrigir os erros.")
 
@@ -574,7 +580,9 @@ def step_generation():
                 "Serão gravados na pasta:\n"
                 f"- `contracts/{dataset}/{table}.odcs.yaml` — o data contract\n"
                 f"- `ingestion-config/{dataset}/{table}.ingestion.yml` — para o orquestrador\n"
-                f"- `{dataset}-transformation/` — projeto da transformação (com git init)\n"
+                f"- `{dataset}-transformation/` — projeto "
+            f"{service.LANGUAGE_LABELS[ss.form.get('transformationLanguage') or 'pyspark']} da transformação "
+            "(com git init)\n"
                 "- `naming/` — nomenclatura revisada")
         bad_prefix = bool(ss.get("publish")) and not str(ss.get("publish_prefix", "")).startswith("s3://")
         nav = st.container(horizontal=True)
@@ -600,7 +608,7 @@ def step_generation():
         st.download_button("Tudo (.zip)", _zip(r.output_dir, r.files, r.contract_path), f"{dataset}-{table}.zip",
                            icon=":material/folder_zip:", use_container_width=True)
     st.markdown("**Próximos passos:** envie o `ingestion.yml` ao S3 lido pelo orquestrador (se ainda não enviou) e "
-                f"compile e suba o projeto `{dataset}-transformation`.")
+                f"suba o projeto `{dataset}-transformation`.")
     with st.expander("Arquivos gerados"):
         st.code("\n".join([r.contract_path.relative_to(r.output_dir).as_posix(), *r.files]), language="text")
     with st.expander("Log da geração"):

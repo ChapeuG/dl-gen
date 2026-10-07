@@ -14,20 +14,22 @@ ao Data Lake:
      ┌──────────┴──────────────┐
      ▼                         ▼
  INGESTÃO                   TRANSFORMAÇÃO
- ingestion.yml              projeto PySpark <dataset>-transformation
+ ingestion.yml              projeto PySpark ou Scala <dataset>-transformation
  (lido pelo orquestrador)   (raw → staging Delta + tabela Hive)
 ```
 
 - **Ingestão:** sai um arquivo `ingestion.yml`, que o projeto
   [`ingestion-orchestrator`](https://github.com/ChapeuG/ingestion-orchestrator) usa para ler a origem e gravar na raw.
-- **Transformação:** sempre sai o projeto PySpark `<dataset>-transformation`, no padrão das skills de transformação.
+- **Transformação:** sempre sai o projeto `<dataset>-transformation`, no padrão das skills de transformação. Você
+  escolhe a linguagem: **PySpark** (padrão) ou **Scala** (sbt).
 
 ---
 
 ## 1. Instalar (uma vez só)
 
-Precisa de **Python 3.10+**. O framework valida os arquivos `.py` gerados sozinho (não precisa de Spark nem de
-Java instalados para gerar).
+Precisa de **Python 3.10+**. No projeto PySpark, o framework valida os `.py` gerados sozinho (não precisa de Spark
+nem de Java). No projeto Scala, para compilar precisa também do **sbt** (sem ele o projeto é gravado, mas não
+compilado).
 
 ```powershell
 git clone https://github.com/ChapeuG/dl-gen.git
@@ -52,7 +54,7 @@ O navegador abre em `http://localhost:8501` com uma linha do tempo de 4 etapas:
 
 | Etapa | O que você faz |
 |---|---|
-| **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
+| **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, o **projeto de transformação** (PySpark ou Scala), origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
 | **2. Campos** | Recebe os campos com o **nome na staging** e a descrição propostos para a transformação. Edite o que quiser direto na tabela. |
 | **3. Validação** | Vê um checklist (✅ ok, ⚠️ aviso, ❌ erro) e a prévia do contrato, do `ingestion.yml` e da transformação. Com erro, o botão de gerar fica bloqueado. |
 | **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato, o `ingestion.yml` ou tudo em `.zip`. |
@@ -111,7 +113,7 @@ Sai isto na pasta atual:
 
 ```
 ingestion-config\sakila\actor.ingestion.yml     ← ingestão (para o orquestrador)
-sakila-transformation\                          ← projeto PySpark da transformação (já com git init)
+sakila-transformation\                          ← projeto da transformação, PySpark ou Scala (já com git init)
 naming\actor.json                               ← nomes das colunas na staging, para você revisar
 ```
 
@@ -150,7 +152,7 @@ cd sakila-transformation
 git add . ; git commit -m "Transformação actor" ; git push
 ```
 
-Estrutura gerada:
+Estrutura gerada em **PySpark** (padrão):
 
 ```
 sakila-transformation\
@@ -168,6 +170,19 @@ zip -r datalake.zip datalake
 spark-submit --packages io.delta:delta-spark_2.12:3.3.0 --py-files datalake.zip main.py --table_name actor --data_source s3://<raw>/sakila/actor/ --output_uri s3://<bucket>/<time>/sakila/actor
 ```
 
+Em **Scala** (`--language scala`, ou `transformationLanguage: scala` nas `customProperties` do contrato):
+
+```
+sakila-transformation\
+  build.sbt, project\                       ← Spark 3.5 + Delta 3.3, sbt-assembly
+  src\main\scala\br\com\datalake\
+    Main.scala                              ← entry point (--table_name escolhe o processor)
+    processor\actor\ActorModel.scala, ActorProcessor.scala
+    utils\, error\
+```
+
+Compile com `sbt compile` (o jar sai com `sbt assembly`).
+
 O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeCommit), `catalog-info.yaml` e o SDD em
 `docs_sdd\actor_sdd_doc.md`. Complete as seções pendentes do SDD.
 
@@ -182,11 +197,16 @@ dl-gen generate --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql --dataset pre
 No modo contrato, o yml sai com `PREENCHER` onde faltar informação (servidor, secret, destino). Por isso, para a
 ingestão nova, prefira o contrato.
 
-**Várias tabelas no mesmo projeto de transformação:** gere a primeira normalmente e as próximas com `--append`.
+**Escolher a linguagem da transformação:** `--language pyspark` (padrão) ou `--language scala`. Também vale a
+variável `$DL_LANGUAGE` ou a propriedade `transformationLanguage` do contrato (a flag prevalece).
 
-**Só a lista de campos (`FieldSpec`) para colar num model existente:**
+**Várias tabelas no mesmo projeto de transformação:** gere a primeira normalmente e as próximas com `--append`
+(use a mesma linguagem).
+
+**Só o bloco de campos para colar num model existente** (`FieldSpec` em PySpark; `ModelField` em Scala):
 ```powershell
 dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o fields.py
+dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql --language scala -o Field.scala
 ```
 
 ---
@@ -253,7 +273,8 @@ Regras que o framework aplica sozinho:
 | `dl-gen` não é reconhecido | Rode `pip install -e ".[ui]"` de novo na pasta do framework |
 | `dl-gen ui` diz que falta o Streamlit | `pip install -e ".[ui]"` |
 | `UnicodeEncodeError` no terminal | Rode `$env:PYTHONUTF8 = "1"` no PowerShell antes do comando |
-| `Transformação falhou` | Um `.py` gerado tem erro de sintaxe (veja o arquivo e a linha no log). Corrija a nomenclatura/contrato e gere de novo |
+| `Transformação falhou` | PySpark: um `.py` gerado tem erro de sintaxe; Scala: o `sbt compile` falhou. Veja o arquivo e a linha no log |
+| `sbt não encontrado` | Só no projeto Scala: ele foi gravado, mas não compilado. Instale o sbt para compilar |
 | Aviso de `PREENCHER` | Falta um campo obrigatório no contrato. Complete e gere de novo |
 | `O contrato tem N tabelas; informe --table` | Use `--table <nome>` |
 | Nome de coluna ruim | Corrija em `naming\<tabela>.json` (ou `stagingName` no contrato) e gere de novo |

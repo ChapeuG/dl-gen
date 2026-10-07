@@ -29,6 +29,8 @@ ODCS_VERSION = "v3.2.0"
 SOURCE_TYPES = sorted(SOURCES)
 LOGICAL_TYPES = ["string", "integer", "number", "boolean", "date", "timestamp", "time", "array", "object"]
 ENVIRONMENTS = ["dev", "hml", "prd"]
+LANGUAGES = ["pyspark", "scala"]
+LANGUAGE_LABELS = {"pyspark": "PySpark", "scala": "Scala (sbt)"}
 
 _SPARK_TO_LOGICAL = {
     "StringType": "string", "BooleanType": "boolean", "IntegerType": "integer", "LongType": "integer",
@@ -48,7 +50,7 @@ def empty_form() -> dict:
         "description": "", "owner": "", "sourceType": "postgres", "schema": "",
         "loadMode": "incremental", "incrementalColumns": [], "fetchSize": 150000, "numQueriesParallel": 1,
         "rawDatabase": "", "rawPartitionColumn": "", "cryptographySecretArn": "",
-        "qualityUniqueKey": True, "qualityNotEmpty": True,
+        "qualityUniqueKey": True, "qualityNotEmpty": True, "transformationLanguage": "pyspark",
     }
 
 
@@ -119,7 +121,8 @@ def form_from_contract(text: str, table: str = "") -> tuple[dict, list[dict], li
             "cryptographySecretArn": tp.get("cryptographySecretArn", ""),
             "qualityUniqueKey": any(q.get("metric") == "duplicateValues" for q in t.get("quality") or []),
             "qualityNotEmpty": any(q.get("metric") == "rowCount" for q in t.get("quality") or []),
-            "githubOrg": cp.get("githubOrg", "")}
+            "githubOrg": cp.get("githubOrg", ""),
+            "transformationLanguage": cp.get("transformationLanguage", "pyspark")}
     server_rows = [{"environment": s.get("environment", ""), "host": s.get("host", ""), "port": s.get("port"),
                     "database": s.get("database") or s.get("serviceName", ""),
                     "secretId": custom_props(s).get("secretId", "")} for s in servers] or empty_servers()
@@ -241,7 +244,8 @@ def build_contract(form: dict, servers: list[dict], columns: list[dict], naming:
             "description": str(form.get("description") or "").strip(),
             "customProperties": table_props, "properties": properties, "quality": quality,
         })],
-        "customProperties": _props({"githubOrg": str(form.get("githubOrg") or "").strip()}),
+        "customProperties": _props({"githubOrg": str(form.get("githubOrg") or "").strip(),
+                                    "transformationLanguage": form.get("transformationLanguage") or "pyspark"}),
     })
     return contract
 
