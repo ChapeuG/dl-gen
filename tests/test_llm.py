@@ -8,7 +8,7 @@ import sys
 import pytest
 from pydantic import BaseModel
 
-from framework.llm import CLAUDE_SETTINGS_ENV, get_chat_model, load_litellm_config, resolve_model_name
+from framework.llm import CLAUDE_SETTINGS_ENV, check_model, get_chat_model, load_litellm_config, resolve_model_name
 
 
 def _settings(tmp_path, monkeypatch, data: dict):
@@ -70,3 +70,17 @@ def test_chat_model_points_to_proxy(tmp_path, monkeypatch):
     assert model.openai_api_key.get_secret_value() == "sk-1"
     assert get_chat_model("litellm:claude-sonnet-5-5").model_name == "claude-sonnet-5-5"
     model.with_structured_output(_Out)  # tool calling, sem chamada de rede
+
+
+def test_check_model(tmp_path, monkeypatch):
+    assert check_model("")[0] == "off"
+    assert check_model("litellm:claude")[0] == "error"  # sem settings.json
+    _settings(tmp_path, monkeypatch, {"env": {"ANTHROPIC_BASE_URL": "https://litellm.example/v1", "ANTHROPIC_AUTH_TOKEN": "sk-1"}})
+    level, message = check_model("litellm:claude")
+    assert level == "ok" and "litellm.example" in message and "sk-1" not in message
+    assert check_model("litellm:")[0] == "error"  # sem modelo no campo nem no settings
+    assert check_model("gpt-4o")[0] == "warning"
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert check_model("openai:gpt-4o-mini") == ("error", "Variável OPENAI_API_KEY não definida. Usando o glossário.")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-2")
+    assert check_model("openai:gpt-4o-mini")[0] == "ok"

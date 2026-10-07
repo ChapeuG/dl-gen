@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +38,8 @@ _SPARK_TO_LOGICAL = {
 
 COLUMN_KEYS = ["name", "physicalType", "logicalType", "primaryKey", "required", "partitioned", "encrypt", "description"]
 SERVER_KEYS = ["environment", "host", "port", "database", "secretId"]
+# Papéis da coluna (badges na tela) → flag da linha de coluna
+ROLES = {"PK": "primaryKey", "incremental": "partitioned", "LGPD": "encrypt", "obrigatória": "required"}
 
 
 def empty_form() -> dict:
@@ -51,6 +54,18 @@ def empty_form() -> dict:
 
 def empty_servers() -> list[dict]:
     return [{"environment": "prd", "host": "", "port": None, "database": "", "secretId": ""}]
+
+
+def roles_of(column: dict) -> list[str]:
+    return [role for role, key in ROLES.items() if column.get(key)]
+
+
+def with_roles(column: dict, roles) -> dict:
+    """Linha do editor (com a lista de papéis) → linha de coluna com as flags."""
+    roles = set(roles or [])
+    out = {k: v for k, v in column.items() if k != "roles"}
+    out.update({key: role in roles for role, key in ROLES.items()})
+    return out
 
 
 def _logical(spark_type: str) -> str:
@@ -276,6 +291,7 @@ class Check:
     level: str   # ok | warning | error
     title: str
     detail: str = ""
+    target: str = ""  # campo a corrigir (chave do formulário, "columns", "servers" ou "naming")
 
 
 @dataclass
@@ -288,36 +304,37 @@ class ValidationResult:
         return not any(c.level == "error" for c in self.checks)
 
 
-def _required_checks(contract: dict) -> list[Check]:
+def health_checks(contract: dict) -> list[Check]:
+    """Conferências rápidas do formulário (sem gerar nada): alimentam a saúde do contrato e a validação."""
     checks: list[Check] = []
     table = (contract.get("schema") or [{}])[0]
     props = table.get("properties") or []
     tp = custom_props(table)
 
-    def need(cond: bool, title: str, detail: str, level: str = "error"):
-        checks.append(Check("ok" if cond else level, title, "" if cond else detail))
+    def need(cond: bool, title: str, detail: str, target: str, level: str = "error"):
+        checks.append(Check("ok" if cond else level, title, "" if cond else detail, target))
 
-    need(bool(contract.get("dataProduct")), "Dataset informado", "Preencha o dataset na etapa 1.")
-    need(bool(table.get("name")), "Tabela informada", "Preencha o nome da tabela.")
-    need(bool(props), "Colunas informadas", "Adicione as colunas (importe a DDL ou digite).")
+    need(bool(contract.get("dataProduct")), "Dataset informado", "Preencha o dataset na etapa 1.", "dataset")
+    need(bool(table.get("name")), "Tabela informada", "Preencha o nome da tabela.", "table")
+    need(bool(props), "Colunas informadas", "Adicione as colunas (importe a DDL ou digite).", "columns")
     need(any(p.get("primaryKey") for p in props), "Chave primária marcada",
-         "Marque ao menos uma coluna como chave: ela é a chave do MERGE na transformação.")
+         "Marque ao menos uma coluna como chave: ela é a chave do MERGE na transformação.", "columns")
     partitioned = [p["name"] for p in props if p.get("partitioned")]
-    need(len(partitioned) <= 1, "No máximo uma coluna incremental", f"Marcadas: {', '.join(partitioned)}.")
+    need(len(partitioned) <= 1, "No máximo uma coluna incremental", f"Marcadas: {', '.join(partitioned)}.", "columns")
     if tp.get("loadMode") == "incremental":
         need(len(partitioned) == 1, "Coluna incremental marcada",
-             "Carga incremental precisa de uma coluna de data marcada como incremental (ou use carga full).")
+             "Carga incremental precisa de uma coluna de data marcada como incremental (ou use carga full).", "columns")
     servers = contract.get("servers") or []
-    need(bool(servers), "Servidor de origem", "Informe ao menos um ambiente (dev, hml ou prd).")
+    need(bool(servers), "Servidor de origem", "Informe ao menos um ambiente (dev, hml ou prd).", "servers")
     for s in servers:
         need(bool(custom_props(s).get("secretId")), f"Secret do ambiente {s.get('environment')}",
-             "Informe o ID/ARN da secret com usuário e senha.")
+             "Informe o ID/ARN da secret com usuário e senha.", "servers")
         need(bool(s.get("host")), f"Host do ambiente {s.get('environment')}",
-             "Sem host no contrato: ele precisa estar na secret (host ou url).", level="warning")
-    need(bool(tp.get("rawPartitionColumn")), "Coluna de partição da raw", "Informe a coluna de partição da raw.")
+             "Sem host no contrato: ele precisa estar na secret (host ou url).", "servers", level="warning")
+    need(bool(tp.get("rawPartitionColumn")), "Coluna de partição da raw", "Informe a coluna de partição da raw.", "rawPartitionColumn")
     if any(str(custom_props(p).get("encrypt")).lower() == "true" for p in props):
         need(bool(tp.get("cryptographySecretArn")), "Chave de criptografia",
-             "Há coluna criptografada: informe o ARN da secret com a chave AES.")
+             "Há coluna criptografada: informe o ARN da secret com a chave AES.", "cryptographySecretArn")
     return checks
 
 
@@ -336,7 +353,7 @@ def validate(contract: dict) -> ValidationResult:
     except ValueError as e:
         return ValidationResult([Check("error", "Estrutura do data contract (ODCS)", str(e))])
 
-    checks += _required_checks(contract)
+    checks += health_checks(contract)
     if any(c.level == "error" for c in checks):
         return ValidationResult(checks)
 
@@ -360,7 +377,7 @@ def validate(contract: dict) -> ValidationResult:
 
     if errors:
         detail = "; ".join(f"{e['raw_field']}: {e['message']}" for e in errors)
-        checks.append(Check("error", "Padrão de nomenclatura", detail))
+        checks.append(Check("error", "Padrão de nomenclatura", detail, "naming"))
     else:
         checks.append(Check("ok", "Padrão de nomenclatura", ""))
 
@@ -374,6 +391,14 @@ def validate(contract: dict) -> ValidationResult:
 
 # ── Etapa 4: geração ───────────────────────────────────────────────────
 
+OUTPUT_DIR_ENV = "DL_OUTPUT_DIR"
+
+
+def default_output_dir() -> str:
+    """Pasta usada quando nenhuma é informada: $DL_OUTPUT_DIR > C:/temp_tables (Windows) > ~/temp_tables."""
+    return os.getenv(OUTPUT_DIR_ENV) or (r"C:\temp_tables" if os.name == "nt" else str(Path.home() / "temp_tables"))
+
+
 @dataclass
 class GenerationResult:
     output_dir: Path
@@ -384,10 +409,13 @@ class GenerationResult:
 
 
 def generate(contract: dict, output_dir: str, llm_model: str = "", publish_s3: str = "") -> GenerationResult:
-    """Grava o contrato em contracts/<dataset>/<tabela>.odcs.yaml e gera ingestion.yml + transformação."""
+    """Grava o contrato em contracts/<dataset>/<tabela>.odcs.yaml e gera ingestion.yml + transformação.
+
+    output_dir vazio = default_output_dir().
+    """
     from framework.graph import build_graph
 
-    out = Path(output_dir).expanduser().resolve()
+    out = Path(str(output_dir or "").strip() or default_output_dir()).expanduser().resolve()
     out.mkdir(parents=True, exist_ok=True)
     text = dump_contract(contract)
     table = contract["schema"][0]["name"]

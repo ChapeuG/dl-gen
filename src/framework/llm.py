@@ -14,11 +14,13 @@ LiteLLM: URL e chave vêm de C:\\Users\\<matricula>\\.claude\\settings.json (Pat
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 DEFAULT_MODEL_ENV = "DL_LLM_MODEL"
 CLAUDE_SETTINGS_ENV = "DL_CLAUDE_SETTINGS"
@@ -96,6 +98,48 @@ def resolve_model_name(cli_value: str | None = None) -> str:
     except RuntimeError:
         return ""
     return f"{LITELLM_PREFIX}{cfg.model}" if cfg and cfg.model else ""
+
+
+# Provedor → (pacote do LangChain, variável com a chave). Vazio = credencial que não dá para conferir aqui.
+_PROVIDERS = {
+    "openai": ("langchain_openai", "OPENAI_API_KEY"),
+    "anthropic": ("langchain_anthropic", "ANTHROPIC_API_KEY"),
+    "azure_openai": ("langchain_openai", "AZURE_OPENAI_API_KEY"),
+    "bedrock": ("langchain_aws", ""),
+}
+
+
+def check_model(model: str) -> tuple[str, str]:
+    """Confere se o modelo tem o que precisa (pacote, chave), sem chamar o LLM.
+
+    Devolve (nível, mensagem): off (sem LLM), ok, warning (não deu para conferir) ou error (vai cair na heurística).
+    A mensagem nunca traz a chave.
+    """
+    model = (model or "").strip()
+    if not model:
+        return "off", "Sem LLM: os nomes vêm do glossário (heurística)."
+    if model.startswith(LITELLM_PREFIX):
+        try:
+            cfg = load_litellm_config()
+        except RuntimeError as e:
+            return "error", f"{e}. Usando o glossário."
+        if cfg is None:
+            return "error", f"Chave do LiteLLM não encontrada em {claude_settings_path()}. Usando o glossário."
+        if not model[len(LITELLM_PREFIX):] and not cfg.model:
+            return "error", "Informe o modelo: litellm:<modelo>."
+        host = urlparse(cfg.base_url).netloc or cfg.base_url
+        return "ok", f"LiteLLM configurado em {host} (chave do {Path(cfg.source).name})."
+    provider = model.split(":", 1)[0] if ":" in model else ""
+    if provider not in _PROVIDERS:
+        return "warning", "Formato esperado: provedor:modelo (litellm, openai, anthropic, azure_openai ou bedrock)."
+    package, key = _PROVIDERS[provider]
+    if importlib.util.find_spec(package) is None:
+        return "error", f"Falta o pacote {package} para usar {provider}. Usando o glossário."
+    if not key:
+        return "warning", f"{provider}: credenciais não conferidas aqui; uma falha cai no glossário."
+    if not os.getenv(key):
+        return "error", f"Variável {key} não definida. Usando o glossário."
+    return "ok", f"{provider} configurado (chave em {key})."
 
 
 def _litellm_chat_model(model_name: str):

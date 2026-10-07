@@ -132,3 +132,11 @@ def test_generate_writes_everything(tmp_path):
     assert (tmp_path / "naming" / "cliente.json").exists()
     cfg = yaml.safe_load((tmp_path / "ingestion-config" / "vendas" / "cliente.ingestion.yml").read_text(encoding="utf-8"))
     assert cfg["encryption"]["columns"] == ["nu_cpf"]
+
+
+def test_generate_without_folder_uses_default(tmp_path, monkeypatch):
+    monkeypatch.setenv(service.OUTPUT_DIR_ENV, str(tmp_path / "padrao"))
+    form, servers, rows = _filled()
+    r = service.generate(service.build_contract(form, servers, rows), "  ")
+    assert r.output_dir == tmp_path / "padrao"
+    assert (tmp_path / "padrao" / "contracts" / "vendas" / "cliente.odcs.yaml").exists()

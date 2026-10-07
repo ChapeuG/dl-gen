@@ -304,7 +304,10 @@ def ui(port: int):
     app = Path(__file__).parent / "ui" / "app.py"
     console.print(f"[cyan]Abrindo a interface em http://localhost:{port} (Ctrl+C para sair)[/cyan]")
     sys.exit(subprocess.call([sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(port),
-                              "--browser.gatherUsageStats", "false"]))
+                              "--browser.gatherUsageStats", "false",
+                              # tema do Studio (escuro)
+                              "--theme.base", "dark", "--theme.primaryColor", "#6366f1", "--theme.baseRadius", "medium",
+                              "--theme.showSidebarBorder", "true"]))
 
 
 if __name__ == "__main__":

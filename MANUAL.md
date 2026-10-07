@@ -55,7 +55,7 @@ O navegador abre em `http://localhost:8501` com uma linha do tempo de 4 etapas:
 | **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
 | **2. Campos** | Recebe os campos com o **nome na staging** e a descrição propostos para a transformação. Edite o que quiser direto na tabela. |
 | **3. Validação** | Vê um checklist (✅ ok, ⚠️ aviso, ❌ erro) e a prévia do contrato, do `ingestion.yml` e da transformação. Com erro, o botão de gerar fica bloqueado. |
-| **4. Geração** | Escolhe a pasta de saída (e, se quiser, o prefixo S3) e clica em **Gerar arquivos**. Baixa o contrato, o `ingestion.yml` ou tudo em `.zip`. |
+| **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato, o `ingestion.yml` ou tudo em `.zip`. |
 
 O que é gravado na pasta de saída: `contracts/<dataset>/<tabela>.odcs.yaml`, `ingestion-config/...`,
 `<dataset>-transformation/` e `naming/`. Para usar LLM na nomenclatura, informe o modelo na barra lateral
@@ -206,6 +206,8 @@ contra o padrão de nomenclatura e, se o LLM falhar, volta para a heurística so
 - **Outros provedores:** `--llm-model openai:gpt-4o-mini`, `anthropic:...`, `bedrock:...` (com a chave do provedor).
 
 No fim da execução, a nomenclatura mostra a fonte usada: `contrato`, `arquivo`, `llm` ou `heuristica`.
+Na interface, a barra lateral mostra embaixo do campo do modelo se o LLM está configurado (URL do LiteLLM, pacote,
+variável com a chave) ou se vai cair no glossário. A conferência não chama o LLM e nunca mostra a chave.
 
 ---
 
