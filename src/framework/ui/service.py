@@ -20,7 +20,7 @@ import yaml
 
 from framework.cli import _initial_state
 from framework.ingestion_config import placeholders
-from framework.parsers.contract_parser import custom_props, load_contract, relationships_of
+from framework.parsers.contract_parser import check_relationships, custom_props, load_contract, relationships_of
 from framework.parsers.ddl_parser import parse_ddl_tables
 from framework.standards.nomenclatura import validate_naming
 from framework.standards.sources import SOURCES, get_source
@@ -174,24 +174,24 @@ def _server_schema(form: dict, source_type: str) -> str:
             or _DEFAULT_SCHEMA[source_type])
 
 
-def contract_from_ddl(ddl: str, form: dict, servers: list[dict]) -> dict:
-    """DDL com uma ou várias tabelas → um data contract com todas elas e as FKs em relationships.
+def contracts_from_ddl(ddl: str, form: dict, servers: list[dict]) -> list[dict]:
+    """DDL com uma ou várias tabelas → um data contract por tabela, com as FKs em relationships.
 
+    As FKs apontam para tabela.coluna de outro contrato (validadas entre os contratos gerados).
     Tabela sem coluna de data na origem vira carga full; com data, incremental pela primeira coluna de data.
     """
     source_type = form.get("sourceType", "postgres")
-    tables = []
+    contracts = []
     for name in ddl_tables(ddl):
         table_form, rows = columns_from_ddl(ddl, source_type, name)
         incremental = [r["name"] for r in rows if r["partitioned"]]
         merged = {**empty_form(), **form, **table_form, "loadMode": "incremental" if incremental else "full",
                   "incrementalColumns": incremental}
-        tables.append(build_contract(merged, servers, rows)["schema"][0])
-    contract = build_contract({**empty_form(), **form, "table": tables[0]["name"]}, servers, [{"name": "x"}])
-    contract["schema"] = tables
-    contract["name"] = str(form.get("dataset", "")).strip().lower()
-    load_contract(dump_contract(contract))  # valida estrutura e relationships
-    return contract
+        contract = build_contract(merged, servers, rows)
+        load_contract(dump_contract(contract))  # valida a estrutura de cada um
+        contracts.append(contract)
+    check_relationships(contracts)
+    return contracts
 
 
 def build_contract(form: dict, servers: list[dict], columns: list[dict], naming: dict[str, dict] | None = None) -> dict:

@@ -91,7 +91,7 @@ def load_contract(text: str) -> dict:
         for prop in table["properties"]:
             if not prop.get("name"):
                 raise ValueError(f"Contrato inválido: coluna sem 'name' na tabela {table['name']}")
-    _check_relationships(contract)
+    check_relationships([contract])
     return contract
 
 
@@ -104,11 +104,15 @@ def relationships_of(prop: dict) -> list[str]:
     return out
 
 
-def _check_relationships(contract: dict) -> None:
-    """Toda FK aponta para tabela.coluna; se a tabela estiver no contrato, a coluna precisa existir nela."""
+def check_relationships(contracts: list[dict]) -> None:
+    """Toda FK aponta para tabela.coluna; se a tabela estiver entre os contratos informados, a coluna precisa existir.
+
+    Com um contrato só, vale para as tabelas dele; com a pasta de contratos, as FKs são cruzadas entre os arquivos.
+    """
+    tables = [t for c in contracts for t in c["schema"]]
     columns = {t["name"].lower(): {column_name(p).lower() for p in t["properties"]} | {p["name"].lower() for p in t["properties"]}
-               for t in contract["schema"]}
-    for table in contract["schema"]:
+               for t in tables}
+    for table in tables:
         for prop in table["properties"]:
             for ref in relationships_of(prop):
                 ref_table, _, ref_col = ref.rpartition(".")

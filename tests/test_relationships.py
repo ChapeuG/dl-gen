@@ -7,7 +7,7 @@ import yaml
 from click.testing import CliRunner
 
 from framework.cli import main
-from framework.parsers.contract_parser import load_contract
+from framework.parsers.contract_parser import check_relationships, load_contract
 from framework.parsers.ddl_parser import parse_ddl, parse_ddl_tables
 from framework.ui import service
 
@@ -39,11 +39,11 @@ CREATE TABLE actor_movies (
 """
 
 
-def _contract(**form):
-    return service.contract_from_ddl(DDL, {"dataset": "filmes", "sourceType": "mysql",
-                                           "rawPartitionColumn": "dt_ingestao", **form},
-                                     [{"environment": "dev", "host": "localhost", "port": 3306,
-                                       "database": "filmes", "secretId": "arn:secret"}])
+def _contracts(**form):
+    return service.contracts_from_ddl(DDL, {"dataset": "filmes", "sourceType": "mysql",
+                                            "rawPartitionColumn": "dt_ingestao", **form},
+                                      [{"environment": "dev", "host": "localhost", "port": 3306,
+                                        "database": "filmes", "secretId": "arn:secret"}])
 
 
 def test_parse_all_tables_with_foreign_keys():
@@ -64,52 +64,57 @@ def test_inline_and_composite_foreign_keys():
     assert [f.get("references") for f in composite["fields"]] == ["y.c", "y.d"]
 
 
-def test_contract_from_ddl_has_relationships():
-    contract = _contract()
-    assert [t["name"] for t in contract["schema"]] == ["actor", "movies", "actor_movies"]
-    am = {p["name"]: p for p in contract["schema"][2]["properties"]}
+def test_one_contract_per_table_with_relationships():
+    contracts = _contracts()
+    assert [c["schema"][0]["name"] for c in contracts] == ["actor", "movies", "actor_movies"]
+    assert [len(c["schema"]) for c in contracts] == [1, 1, 1]
+    assert [c["name"] for c in contracts] == ["filmes-actor", "filmes-movies", "filmes-actor_movies"]
+    actor, movies, actor_movies = contracts
+    am = {p["name"]: p for p in actor_movies["schema"][0]["properties"]}
     assert am["actor_id"]["relationships"] == [{"type": "foreignKey", "to": "actor.id"}]
     assert am["movie_id"]["relationships"] == [{"type": "foreignKey", "to": "movies.id"}]
     assert "relationships" not in am["personagem"]
-    movies = {p["name"]: p for p in contract["schema"][1]["properties"]}
-    assert movies["ano_lancamento"]["logicalType"] == "integer"  # YEAR do MySQL vira número
+    mv = {p["name"]: p for p in movies["schema"][0]["properties"]}
+    assert mv["ano_lancamento"]["logicalType"] == "integer"  # YEAR do MySQL vira número
     # Sem coluna de data de controle: carga full
-    load = {t["name"]: dict((p["property"], p["value"]) for p in t["customProperties"])["loadMode"]
-            for t in contract["schema"]}
-    assert set(load.values()) == {"full"}
+    load = [dict((p["property"], p["value"]) for p in c["schema"][0]["customProperties"])["loadMode"]
+            for c in contracts]
+    assert load == ["full", "full", "full"]
 
     # Ida e volta pelo Studio: a FK continua na coluna
-    text = service.dump_contract(contract)
-    cols = {c["name"]: c for c in service.form_from_contract(text, "actor_movies")[2]}
+    cols = {c["name"]: c for c in service.form_from_contract(service.dump_contract(actor_movies))[2]}
     assert cols["actor_id"]["references"] == "actor.id"
 
 
-def test_relationship_to_missing_column_is_rejected():
-    contract = _contract()
-    contract["schema"][2]["properties"][0]["relationships"] = [{"type": "foreignKey", "to": "actor.nao_existe"}]
+def test_relationships_are_checked_across_contracts():
+    actor, movies, actor_movies = _contracts()
+    check_relationships([actor, movies, actor_movies])
+    actor_movies["schema"][0]["properties"][0]["relationships"] = [{"type": "foreignKey", "to": "actor.nao_existe"}]
+    # Sozinho, o contrato aceita (a tabela actor está em outro arquivo)...
+    load_contract(yaml.safe_dump(actor_movies))
+    # ...mas junto com os outros contratos a coluna inexistente é recusada
     with pytest.raises(ValueError, match="nao_existe"):
-        load_contract(yaml.safe_dump(contract))
-    contract["schema"][2]["properties"][0]["relationships"] = [{"type": "foreignKey", "to": "semtabela"}]
+        check_relationships([actor, movies, actor_movies])
+    actor_movies["schema"][0]["properties"][0]["relationships"] = [{"type": "foreignKey", "to": "semtabela"}]
     with pytest.raises(ValueError, match="tabela.coluna"):
-        load_contract(yaml.safe_dump(contract))
-    # Tabela fora do contrato: aceita (a relação pode apontar para outro produto de dados)
-    contract["schema"][2]["properties"][0]["relationships"] = [{"type": "foreignKey", "to": "outro.id"}]
-    load_contract(yaml.safe_dump(contract))
+        load_contract(yaml.safe_dump(actor_movies))
 
 
-def test_cli_contract_and_generate_all_tables(tmp_path):
+def test_cli_contracts_and_generate_folder(tmp_path):
     ddl = tmp_path / "filmes.sql"
     ddl.write_text(DDL, encoding="utf-8")
     runner = CliRunner()
-    contract = tmp_path / "filmes.odcs.yaml"
     r = runner.invoke(main, ["contrato", "--ddl", str(ddl), "--dataset", "filmes", "--source-db", "mysql",
                              "--raw-partition-column", "dt_ingestao", "--host", "localhost", "--database", "filmes",
-                             "--secret-id", "arn:secret", "-o", str(contract)])
+                             "--secret-id", "arn:secret", "-o", str(tmp_path / "contracts")])
     assert r.exit_code == 0, r.output
     assert "actor_id → actor.id" in r.output
+    folder = tmp_path / "contracts" / "filmes"
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "actor.odcs.yaml", "actor_movies.odcs.yaml", "movies.odcs.yaml"]
 
     out = tmp_path / "out"
-    r = runner.invoke(main, ["generate", "--contract", str(contract), "--all-tables", "--output-dir", str(out),
+    r = runner.invoke(main, ["generate", "--contract", str(folder), "--output-dir", str(out),
                              "--naming-dir", str(tmp_path / "naming"), "--llm-model", ""])
     assert r.exit_code == 0, r.output
     ymls = sorted(p.name for p in (out / "ingestion-config" / "filmes").iterdir())
@@ -119,6 +124,12 @@ def test_cli_contract_and_generate_all_tables(tmp_path):
         assert f"{model}.table_name:" in main_py
     sdd = (out / "filmes-transformation" / "docs_sdd" / "actor_movies_sdd_doc.md").read_text(encoding="utf-8")
     assert "`actor.id`" in sdd and "`movies.id`" in sdd
+
+    # FK quebrada entre arquivos: a pasta é recusada antes de gerar qualquer coisa
+    text = (folder / "actor_movies.odcs.yaml").read_text(encoding="utf-8").replace("to: actor.id", "to: actor.xpto")
+    (folder / "actor_movies.odcs.yaml").write_text(text, encoding="utf-8")
+    r = runner.invoke(main, ["generate", "--contract", str(folder), "--dry-run", "--llm-model", ""])
+    assert r.exit_code != 0 and "xpto" in r.output
 
 
 def test_studio_picks_table_from_multi_table_ddl():
