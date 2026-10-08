@@ -260,7 +260,7 @@ contra o padrão de nomenclatura e, se o LLM falhar, volta para a heurística so
   ```
 - **Outros provedores:** `--llm-model openai:gpt-4o-mini`, `anthropic:...`, `bedrock:...` (com a chave do provedor).
 
-O prompt enviado ao LLM está na skill [`nomenclatura`](src/framework/skills/nomenclatura/SKILL.md). Para mudar as
+O prompt enviado ao LLM está na skill [`data-governance-names`](src/framework/skills/data-governance-names/SKILL.md). Para mudar as
 instruções, edite esse arquivo (veja a seção 9).
 
 No fim da execução, a nomenclatura mostra a fonte usada: `contrato`, `arquivo`, `llm` ou `heuristica`.
@@ -344,17 +344,21 @@ python -m pytest tests -q
 
 ## 9. Skills do agente
 
-O que cada etapa sabe fazer fica em **[`src/framework/skills/`](src/framework/skills/README.md)**, um `SKILL.md`
-por skill:
+As regras que o framework segue vêm das skills em **[`src/framework/skills/`](src/framework/skills/README.md)**:
+um `SKILL.md` por skill (quando usar + regras), com `scripts/` que os templates espelham 1:1 e `references/` com os
+documentos de apoio. São 18: as 16 da biblioteca de transformação Spark + Delta (`sdd-specification`,
+`data-governance-names`, `data-transformation-patterns`, `project-structure`, `processor-orchestration`,
+`job-parameters`, `delta-write-patterns`, `hive-table-management`...) e duas do próprio dl-gen
+(`leitura-de-schema` e `ingestao`). O índice, com onde cada uma é aplicada, está no
+[README da pasta](src/framework/skills/README.md).
 
-| Skill | O que faz |
-|---|---|
-| [`leitura-de-schema`](src/framework/skills/leitura-de-schema/SKILL.md) | Lê campos e tipos de DDL, query, Avro, JSON Schema, StructType, planilha, parquet ou CSV |
-| [`nomenclatura`](src/framework/skills/nomenclatura/SKILL.md) | Nome na staging e descrição de cada campo (é o prompt do LLM) |
-| [`ingestao`](src/framework/skills/ingestao/SKILL.md) | Regras do `ingestion.yml` |
-| [`transformacao`](src/framework/skills/transformacao/SKILL.md) | Estrutura e regras do projeto de transformação |
-| [`sdd`](src/framework/skills/sdd/SKILL.md) | Seções do SDD |
+- A **data-governance-names** é lida em tempo de execução: o prompt do LLM está no `SKILL.md` dela (seções
+  `Prompt do sistema` e `Prompt do pedido`), e as regras *How to Decide the Prefix* e *Guardrails* entram no prompt.
+  Editar o arquivo muda o que o LLM recebe, sem mexer no código.
+- Os `scripts/*.scala` são a fonte dos utilitários do projeto Scala gerado; um teste garante que continuam iguais.
 
-A de nomenclatura é lida em tempo de execução: editar o `SKILL.md` muda o que o LLM recebe, sem mexer no código. As
-outras documentam as regras que o código aplica. Para listar: `dl-gen skills`. No Studio, a barra lateral mostra as
-skills em "Skills do agente".
+```powershell
+dl-gen skills
+```
+
+No Studio, a barra lateral mostra as skills em "Skills do agente".

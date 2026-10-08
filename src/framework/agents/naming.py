@@ -60,8 +60,8 @@ class NamingProposal(BaseModel):
     fields: list[FieldNaming]
 
 
-# Prompts na skill de nomenclatura (skills/nomenclatura/SKILL.md): edite lá para mudar o comportamento do LLM
-_SKILL = load_skill("nomenclatura")
+# Prompts na skill data-governance-names (skills/data-governance-names/SKILL.md): edite lá para mudar o LLM
+_SKILL = load_skill("data-governance-names")
 SYSTEM_PROMPT = _SKILL.section("Prompt do sistema")
 HUMAN_PROMPT = _SKILL.section("Prompt do pedido")
 
@@ -209,6 +209,7 @@ def _llm_propose(state: NamingState) -> tuple[dict[str, dict], str]:
     result: NamingProposal = chain.invoke({
         "reservados": ", ".join(sorted(RESERVED_STAGING)),
         "naturezas": naturezas_table(),
+        "regras": _SKILL.section("How to Decide the Prefix") + "\n\n" + _SKILL.section("Guardrails"),
         "padroes": load_padroes_text(),
         "source_table": schema["source_table"],
         "dataset": schema["dataset"],

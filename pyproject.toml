@@ -35,4 +35,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-framework = ["templates/**/*.j2", "templates/**/*.tpl", "templates/**/*.py", "templates/**/*.scala", "skills/**/*.md", "skills/**/*.txt"]
+framework = ["templates/**/*.j2", "templates/**/*.tpl", "templates/**/*.py", "templates/**/*.scala", "skills/**/*.md", "skills/**/*.txt", "skills/**/*.csv", "skills/**/*.scala"]

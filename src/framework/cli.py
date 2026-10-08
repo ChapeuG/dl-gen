@@ -410,7 +410,7 @@ def skills():
 
     console.print(f"[cyan]Skills em {SKILLS_DIR}[/cyan]\n")
     for skill in list_skills():
-        console.print(f"[bold]{skill.name}[/bold]  ({skill.agent})\n  {skill.description}\n  {skill.path}\n")
+        console.print(f"[bold]{skill.name}[/bold]  → {skill.used_by}\n  {skill.description}\n  {skill.path}\n")
 
 
 @main.command()

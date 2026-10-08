@@ -681,5 +681,5 @@ with st.sidebar:
     with st.expander("Skills do agente", icon=":material/psychology:"):
         st.caption("O que cada etapa sabe fazer, em `src/framework/skills/` (um SKILL.md por skill).")
         for skill in list_skills():
-            st.markdown(f"**{skill.name}** · `{skill.agent}`  \n{skill.description}")
+            st.markdown(f"**{skill.name}**  \n:small[{skill.used_by}]", help=skill.description)
     st.button("Começar um novo contrato", icon=":material/restart_alt:", use_container_width=True, on_click=cb_reset)

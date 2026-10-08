@@ -1,0 +1,57 @@
+Natureza;Mnemônico;Lógico;Físico Oracle;Físico MySql;Físico Postgre;Físico MariaDB
+ano;aa;Oracle: Number(4);NUMBER(4);DECIMAL (4);INT;DECIMAL (4)
+ano;aa;Outros: Decimal(4);-;;;
+código;cd;Oracle: Number(X);NUMBER(X);-;-;-
+código;cd;Outros: Decimal(X);-;DECIMAL (X);DECIMAL (X);DECIMAL (X)
+código;cd;Oracle: Variable Characters(X);VARCHAR2;-;-;-
+código;cd;;(X);;;
+código;cd;Outros: Variable Characters(X);-;VARCHAR(X);VARCHAR(X);VARCHAR(X)
+data;dt;Todos: Date;DATE;DATE;DATE;DATE
+data_hora;dh;Oracle: Data & Time;DATE;-;-;-
+data_hora;dh;Outros: Timestamp;-;TIMESTAMP;TIMESTAMP;TIMESTAMP
+descrição;dc;Todos: Characters(X);CHAR(X);CHAR(X);CHAR(X);CHAR(X)
+descrição;dc;;;;;
+descrição;dc;Oracle: Variable Characters(X);VARCHAR2;-;-;-
+descrição;dc;;(X);;;
+descrição;dc;Outros: Variable Characters(X);-;VARCHAR(X);VARCHAR(X);VARCHAR(X)
+descrição;dc;Opção Cloudera: Text;-;-;-;-
+dia;dd;Oracle: Number(2);NUMBER(2);-;-;-
+dia;dd;Outros: Decimal(2);-;DECIMAL (2);DECIMAL (2);DECIMAL (2)
+hora;hr;Oracle: Time;DATE;-;-;-
+hora;hr;Outros: Timestamp;-;TIMESTAMP;TIMESTAMP;TIMESTAMP
+identificador;id;Todos: Number;A critério do DBA;A critério do DBA;A critério do DBA;A critério do DBA
+indicador;in;Todos: Characters(1);CHAR(1);CHAR(1);CHAR(1);CHAR(1)
+indicador;in;Opção Cloudera: Boolean;-;-;-;-
+mês;mm;Oracle: Number(2);NUMBER(2);-;-;-
+mês;mm;Outros: Decimal(2);-;DECIMAL (2);INT;DECIMAL (2)
+nome;nm;Todos: Characters(X);CHAR(X);CHAR(X);CHAR(X);CHAR(X)
+nome;nm;Oracle: Variable Characters(X);VARCHAR2;-;-;-
+nome;nm;;(X);;;
+nome;nm;Outros: Variable Characters(X);-;VARCHAR(X);VARCHAR(X);VARCHAR(X)
+número;nu;Todos: Characters(X);CHAR(X);CHAR(X);CHAR(X);CHAR(X)
+número;nu;Oracle: Number(X);NUMBER(X);-;-;-
+número;nu;Outros: Decimal(X);-;DECIMAL(X);NUMERIC(X);DECIMAL(X)
+número;nu;Oracle: Variable Characters(X);VARCHAR2;-;-;-
+número;nu;;(X);;;
+número;nu;Outros: Variable Characters(X);-;VARCHAR(X);VARCHAR(X);VARCHAR(X)
+percentual;pc;Oracle: Number(X);NUMBER(X);-;-;-
+percentual;pc;Number(X,Y);NUMBER;;;
+percentual;pc;;(X,Y);;;
+percentual;pc;Outros: Decimal (X);-;DECIMAL(X);NUMERIC(X);DECIMAL(X)
+percentual;pc;Decimal (X,Y);-;DECIMAL (X,Y);NUMERIC( (X,Y);DECIMAL (X,Y)
+quantidade;qt;Oracle: Number(X);NUMBER(X);-;-;-
+quantidade;qt;Number(X,Y);NUMBER;;;
+quantidade;qt;;(X,Y);;;
+quantidade;qt;Outros: Decimal (X);-;DECIMAL(X);INT;DECIMAL(X)
+quantidade;qt;Decimal (X,Y);-;DECIMAL (X,Y);NUMERIC (X,Y);DECIMAL (X,Y)
+sigla;sg;Todos: Characters(X);CHAR(X);CHAR(X);CHAR(X);CHAR(X)
+sigla;sg;Oracle: Variable Characters(X);VARCHAR2(X);-;-;-
+sigla;sg;Outros: Variable Characters(X);-;VARCHAR(X);VARCHAR(X);VARCHAR(X)
+texto;tx;Todos: Characters(X);CHAR(X);CHAR(X);CHAR(X);CHAR(X)
+texto;tx;Oracle: Variable Characters(X);VARCHAR2(X);-;-;-
+texto;tx;Outros: Variable Characters(X);-;VARCHAR(X);VARCHAR(X);VARCHAR(X)
+texto;tx;Opção Cloudera: Text;-;-;-;-
+valor;vl;Oracle: Number(X);NUMBER(X);-;-;-
+valor;vl;Oracle: Number(X,Y);NUMBER(X,Y);;;
+valor;vl;Outros: Decimal (X);-;DECIMAL(X);NUMERIC(X);DECIMAL(X)
+valor;vl;Decimal (X,Y);-;DECIMAL (X,Y);NUMERIC(X,Y);DECIMAL (X,Y)

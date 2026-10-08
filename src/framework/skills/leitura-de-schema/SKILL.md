@@ -1,37 +1,47 @@
 ---
 name: leitura-de-schema
-description: Lê os campos e tipos da tabela de qualquer entrada (DDL, query, Avro, JSON Schema, StructType, lista de campos, planilha, parquet ou CSV de dados) e converte para DDL.
-agent: parsers/schema_reader.py
+description: "Use when the table's fields come from something other than a CREATE TABLE: a SELECT query, an Avro/JSON Schema/Spark StructType, a field list (CSV, spreadsheet, Markdown, DESCRIBE output) or a data file (parquet, CSV). Converts any input that carries field name and type into a DDL, so the rest of the flow (sdd-specification, data-governance-names) starts from the same place."
 ---
 
-# Leitura de schema
+# Leitura de Schema
 
-Usada na entrada (`--ddl`/`--schema` na linha de comando, "Importar colunas" no Studio). O código está em
-`parsers/schema_reader.py`: ele converte a entrada num `CREATE TABLE` e o resto do framework segue igual
-(`parsers/ddl_parser.py` → tipagem → nomenclatura...).
+Use this skill whenever the source structure of a table is not given as a DDL and has to be read from another format
+before the SDD and the field names are derived.
 
-## Formatos aceitos
+## Purpose
 
-| Entrada | Como o formato é reconhecido | De onde vem o tipo |
-|---|---|---|
-| DDL | tem `CREATE TABLE` | do DDL (passa direto) |
-| Query | começa com `SELECT`/`WITH`, ou `CREATE VIEW/TABLE ... AS SELECT` | `CAST(x AS t)`, `x::t`, `CONVERT(t, x)`, literais, `count(*)`, `current_date` |
-| Avro (`.avsc`) | JSON com `"type": "record"` | `long`, `["null", "string"]`, `logicalType` (decimal, date, timestamp) |
-| JSON Schema | JSON com `properties` | `type` + `format` (`date`, `date-time`), `required` define o NOT NULL |
-| StructType do Spark | JSON com `"type": "struct"` (`df.schema.json()`) | `integer`, `decimal(10,2)`, `array` |
-| Lista de campos | JSON `[{name, type}]`, CSV/TSV/`;`/Markdown, planilha `.xlsx`, saída de `DESCRIBE` | coluna de tipo |
-| Arquivo de dados | `.parquet` (schema do arquivo), `.csv`/JSON com registros | inferido dos valores |
+The SDD (skill **sdd-specification**) requires, as minimum information, "DDL ou lista de campos". This skill turns
+any of those into a canonical `CREATE TABLE`, keeping name, type, nullability, primary key and comment of each field.
+In the dl-gen it is implemented by `parsers/schema_reader.py`, used by `--ddl`/`--schema` and by "Importar colunas"
+in the Studio.
 
-## Regras
+## Required Behavior
 
-- Lista de campos: o cabeçalho é reconhecido pelo sentido, sem acento nem caixa: `tipo`/`type` (tipo),
-  `descrição`/`comentário` (comentário), `obrigatório`/`required`, `nulo`/`nullable`, `pk`/`chave`, e
-  `nome`/`campo`/`coluna`/`column`/`field` (nome). Ex: "Nome do Campo", "Tipo de Dado", "Descrição".
-- Texto solto sem cabeçalho (`nome tipo [comentário]` por linha) só é aceito se todos os tipos forem conhecidos.
-- Coluna de query sem tipo vira `varchar` com o comentário "tipo não informado na origem"; revise na tabela de
-  colunas. `SELECT *` é recusado: liste as colunas.
-- Arquivo de dados: uma amostra não prova NOT NULL, então todas as colunas ficam anuláveis.
-- Tipos de outros formatos viram tipos SQL (`long` → `bigint`, `string` → `varchar`, `float64` → `double`,
-  `struct`/`map` → `json`, `array<t>` → `t[]`) e depois seguem a tipagem oficial (`standards/tipagem.py`).
-- O nome da tabela vem do conteúdo (CREATE VIEW, FROM, `name` do Avro, `title` do JSON Schema) ou do nome do
-  arquivo.
+1. Detect the format from the content (and the file extension for binary files):
+
+   | Entrada | Reconhecida por | Tipo vem de |
+   | --- | --- | --- |
+   | DDL | `CREATE TABLE` | o próprio DDL (passa direto) |
+   | Query | começa com `SELECT`/`WITH`, ou `CREATE VIEW/TABLE ... AS SELECT` | `CAST(x AS t)`, `x::t`, `CONVERT(t, x)`, literais, `count(*)`, `current_date` |
+   | Avro (`.avsc`) | JSON com `"type": "record"` | `long`, `["null", "string"]`, `logicalType` (decimal, date, timestamp) |
+   | JSON Schema | JSON com `properties` | `type` + `format` (`date`, `date-time`); `required` define NOT NULL |
+   | StructType do Spark | JSON com `"type": "struct"` (`df.schema.json()`) | `integer`, `decimal(10,2)`, `array` |
+   | Lista de campos | JSON `[{name, type}]`, CSV/TSV/`;`, Markdown, `.xlsx`, saída de `DESCRIBE` | a coluna de tipo |
+   | Arquivo de dados | `.parquet` (schema do arquivo), `.csv`/JSON com registros | inferido dos valores |
+
+2. Recognize field-list headers by meaning, ignoring accents and case: `tipo`/`type` (type), `descrição`/`comentário`
+   (comment), `obrigatório`/`required`, `nulo`/`nullable`, `pk`/`chave`, and `nome`/`campo`/`coluna`/`column`/`field`
+   (name). Ex: "Nome do Campo", "Tipo de Dado", "Descrição".
+3. Translate types from other formats into SQL types (`long` → `bigint`, `string` → `varchar`, `float64` → `double`,
+   `struct`/`map` → `json`, `array<t>` → `t[]`); the official typing (`standards/tipagem.py`) then maps them to Spark.
+4. Take the table name from the content (CREATE VIEW, FROM, Avro `name`, JSON Schema `title`) or from the file name,
+   keeping the source schema (`loja.cliente` → table `cliente`, source `loja.cliente`).
+
+## Guardrails
+
+- Do not guess a type for a query column without `CAST`: use `varchar` and mark the comment
+  "tipo não informado na origem (assumido texto)" so it is reviewed.
+- Do not accept `SELECT *`: ask for the explicit column list.
+- Do not treat a sample as proof of NOT NULL: columns inferred from data files stay nullable.
+- Do not accept free text without a header unless every type in it is a known type.
+- Do not rename fields here: naming belongs to **data-governance-names**.

@@ -74,7 +74,7 @@ Data Lake
               Corporativo – Carlos Caldo – versão 2014). por exemplo:
 Domínio de
 Dados             •   Domínio de negócio: Arranjo de Pagamentos;
-                  •   Domínio de dados: Autorização, Liquidação, Cadastro etc.
+                  •   Domínio de dados: Vendas, Pagamentos, Cadastro etc.
 
               Neste contexto de nomeação de objetos, se aplica a nomes de datasets e
               databases, conforme será descrito no item “Padrões – Data Lake”.
@@ -162,14 +162,14 @@ staging/ingestaolake/cadastro_corporativo/emissor/2021-01-
 s3://datalake-prd-<regiao>-<conta>-
 final/ingestaolake/cadastro_corporativo/emissor/2021-01-
 1/194b5de5c5eca1b9bb22ae3934446760.parquet
-s3://datalake-prd-<regiao>-<conta>-landing/ingestaolake/autorizacao/autorizacao/
+s3://datalake-prd-<regiao>-<conta>-landing/ingestaolake/vendas/vendas/
 filename2021-09-09.txt
 s3://datalake-prd-<regiao>-<conta>-
-raw/ingestaolake/autorizacao/autorizacao/<filename2021-09-09>.txt
+raw/ingestaolake/vendas/vendas/<filename2021-09-09>.txt
 s3://datalake-prd-<regiao>-<conta>-
-staging/ingestaolake/autorizacao/autorizacao/2021-01-
+staging/ingestaolake/vendas/vendas/2021-01-
 01/194b5de5c5eca1b9bb22ae3934446760.parquet
-s3://datalake-prd-<regiao>-<conta>-final/ingestaolake/autorizacao/autorizacao/2021-
+s3://datalake-prd-<regiao>-<conta>-final/ingestaolake/vendas/vendas/2021-
 01-01/194b5de5c5eca1b9bb22ae3934446760.parquet
 
 Nomes de DataBases
@@ -209,13 +209,13 @@ Exceções:
 Exemplos:
 
           Databases
-autorizacao_raw
-autorizacao_staging
-autorizacao_final
+vendas_raw
+vendas_staging
+vendas_final
 cadastro_corporativo_raw
 cadastro_corporativo_staging
 cadastro_corporativo_final
-liquidação_final
+pagamentos_final
 
 Nome de Tabela
 
@@ -250,11 +250,11 @@ Exceções:
 Exemplos:
 
 Tabelas (database.table)
-autorizacao_staging. autorizacao
-autorizacao_fin. autorizacao
+vendas_staging. vendas
+vendas_fin. vendas
 cadastro_corporativo_final.bin
 cadastro_corporativo_final.emissor
-liquidação_final.lancamento_recebido
+pagamentos_final.lancamento_recebido
 
 Nome de Colunas de Tabelas
 natureza_ te_qualificador1 a qualificador10
@@ -329,12 +329,12 @@ Exceções:
 Exemplos:
 
         Views (database.view)
-autorizacao_staging. autorizacao
-autorizacao_fin. autorizacao
+vendas_staging. vendas
+vendas_fin. vendas
 cadastro_corporativo_final.bin
 cadastro_corporativo_final.emissor
-liquidação_final.lancamento_recebido
-autorizacao_staging. autorizacao
+pagamentos_final.lancamento_recebido
+vendas_staging. vendas
 
 Colunas de Visão
 natureza_ te_q1_q2_q3_q4
