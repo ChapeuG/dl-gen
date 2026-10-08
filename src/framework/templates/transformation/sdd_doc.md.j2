@@ -72,7 +72,19 @@ Nenhum enrichment definido.
 
 ## 8. Joins Inter-tabelas
 
+{% if relationships %}
+Relacionamentos declarados no contrato (`relationships`, chave estrangeira na origem):
+
+| Coluna (raw → staging) | Referencia |
+|---|---|
+{% for r in relationships %}
+| `{{ r.raw }}` → `{{ r.staging }}` | `{{ r.to }}` |
+{% endfor %}
+
+A transformação carrega esta tabela sozinha (sem join); a relação fica documentada para quem consome a staging.
+{% else %}
 Não aplicável.
+{% endif %}
 
 ## 9. Transformações
 

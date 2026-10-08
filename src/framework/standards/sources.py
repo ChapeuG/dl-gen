@@ -32,7 +32,8 @@ SOURCES: dict[str, SourceDb] = {
     ),
     "mysql": SourceDb(
         name="mysql",
-        type_overrides={"tinyint": "IntegerType", "mediumint": "IntegerType", "longtext": "StringType"},
+        type_overrides={"tinyint": "IntegerType", "mediumint": "IntegerType", "longtext": "StringType",
+                        "year": "IntegerType"},
     ),
     "sqlserver": SourceDb(
         name="sqlserver",

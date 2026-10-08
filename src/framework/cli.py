@@ -176,23 +176,75 @@ def campos(sample_path: str | None, dataset: str | None, output: str | None, dry
 
 
 @main.command()
+@click.option("--ddl", required=True, type=click.Path(exists=True), help="DDL com um ou vários CREATE TABLE")
+@click.option("--dataset", required=True, help="Nome do dataset (dataProduct do contrato)")
+@click.option("--source-db", default="postgres", show_default=True,
+              type=click.Choice(sorted(SOURCES), case_sensitive=False), help="Banco de origem")
+@click.option("--raw-partition-column", default="", help="Coluna de partição da raw (ex: dt_ingestao)")
+@click.option("--env", "environment", default="prd", show_default=True, help="Ambiente do servidor de origem")
+@click.option("--host", default="", help="Host do banco de origem")
+@click.option("--port", default=None, type=int, help="Porta do banco de origem")
+@click.option("--database", default="", help="Database (ou serviceName no Oracle)")
+@click.option("--secret-id", default="", help="ARN da secret com usuário/senha")
+@click.option("--language", default="pyspark", show_default=True,
+              type=click.Choice(["pyspark", "scala"], case_sensitive=False), help="Linguagem da transformação")
+@click.option("--output", "-o", default=None, type=click.Path(dir_okay=False),
+              help="Arquivo do contrato. Default: contracts/<dataset>.odcs.yaml")
+def contrato(ddl: str, dataset: str, source_db: str, raw_partition_column: str, environment: str, host: str,
+             port: int | None, database: str, secret_id: str, language: str, output: str | None):
+    """Cria o data contract (ODCS) de todas as tabelas de uma DDL, com as chaves estrangeiras em relationships."""
+    from framework.ui import service
+
+    form = {"dataset": dataset, "sourceType": source_db.lower(), "rawPartitionColumn": raw_partition_column,
+            "transformationLanguage": language.lower()}
+    servers = [{"environment": environment, "host": host, "port": port, "database": database, "secretId": secret_id}]
+    try:
+        contract = service.contract_from_ddl(Path(ddl).read_text(encoding="utf-8"), form, servers)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from None
+    path = Path(output or Path("contracts") / f"{dataset.lower()}.odcs.yaml")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(service.dump_contract(contract), encoding="utf-8")
+
+    console.print(f"[green]Contrato gravado em {path.resolve()}[/green]")
+    for table in contract["schema"]:
+        refs = [f"{p['name']} → {r['to']}" for p in table["properties"] for r in p.get("relationships") or []]
+        console.print(f"  {table['name']}: {len(table['properties'])} colunas"
+                      + (f"; relações: {', '.join(refs)}" if refs else ""))
+    console.print(f"\nGere tudo com: dl-gen generate --contract {path} --all-tables")
+
+
+@main.command()
 @click.option("--sample", "sample_path", required=False, type=click.Path(exists=True), help="Caminho da amostra (.csv, .json, .parquet)")
 @click.option("--dataset", default=None, help="Nome do dataset (ex: vendas). Default: dataProduct do contrato (obrigatório com --ddl)")
 @click.option("--publish-s3", default="", help="Envia o ingestion.yml para este prefixo S3 (ex: s3://bucket/ingestion-config/). Exige boto3")
 @click.option("--max-iterations", default=5, help="Máximo de iterações do feedback loop")
 @click.option("--skip-input", is_flag=True, help="Pula a geração do ingestion.yml (só Transformation)")
 @click.option("--append", is_flag=True, help="Acumula no projeto de transformação já existente em --output-dir")
+@click.option("--all-tables", is_flag=True,
+              help="Gera todas as tabelas do contrato (um ingestion.yml por tabela, um projeto de transformação)")
 @click.option("--dry-run", is_flag=True, help="Não escreve arquivos no disco, só mostra")
 @click.option("--output-dir", default=".", show_default=True, type=click.Path(file_okay=False),
               help="Pasta onde os projetos são criados (default: pasta atual)")
 @naming_options
-def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
-             max_iterations: int, skip_input: bool, append: bool, dry_run: bool, output_dir: str,
+@click.pass_context
+def generate(ctx: click.Context, sample_path: str | None, dataset: str | None, publish_s3: str,
+             max_iterations: int, skip_input: bool, append: bool, all_tables: bool, dry_run: bool, output_dir: str,
              ddl: str | None, contract_path: str | None, contract_table: str,
              tipagem_path: str | None, llm_model: str | None, naming_dir: str, encrypt: str,
              source_db: str | None, partition_col: str,
              merge_keys: str, github_org: str, codecommit_transformation: str, language: str | None):
     """Gera o ingestion.yml e o projeto de transformação a partir do data contract ou do DDL."""
+    if all_tables:
+        if not contract_path:
+            raise click.UsageError("--all-tables exige --contract")
+        tables = [t["name"] for t in load_contract(Path(contract_path).read_text(encoding="utf-8"))["schema"]]
+        for i, table in enumerate(tables):
+            console.print(f"\n[bold cyan]── Tabela {i + 1}/{len(tables)}: {table}[/bold cyan]")
+            # A partir da segunda, acumula no mesmo projeto de transformação
+            ctx.invoke(generate, **{**ctx.params, "all_tables": False, "contract_table": table,
+                                    "append": append or i > 0})
+        return
 
     # Estado inicial
     initial_state = _initial_state(ddl, sample_path, dataset, tipagem_path, llm_model, naming_dir, dry_run, encrypt,

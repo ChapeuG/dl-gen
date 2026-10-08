@@ -16,7 +16,8 @@ class FieldDef(TypedDict):
     is_fk: bool           # é foreign key?
     nullable: bool        # admite nulo?
     encrypt: bool         # criptografar na ingestão (AES/ECB + base64)?
-    # Opcional: contract_staging_field (stagingName do data contract, prevalece na nomenclatura)
+    # Opcionais: contract_staging_field (stagingName do data contract, prevalece na nomenclatura)
+    #            references ("tabela.coluna" referenciada pela FK — relationships do contrato)
 
 
 class ProfileField(TypedDict):

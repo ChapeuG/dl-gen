@@ -197,6 +197,17 @@ ingestão nova, prefira o contrato.
 **Escolher a linguagem da transformação:** `--language pyspark` (padrão) ou `--language scala`. Também vale a
 variável `$DL_LANGUAGE` ou a propriedade `transformationLanguage` do contrato (a flag prevalece).
 
+**Várias tabelas relacionadas numa DDL só** (ex: `actor`, `movies` e a associativa `actor_movies`): crie um contrato
+com todas as tabelas e gere tudo de uma vez:
+```powershell
+dl-gen contrato --ddl C:\caminho\filmes.sql --dataset filmes --source-db mysql --raw-partition-column dt_ingestao --host <host> --database <db> --secret-id <arn>
+dl-gen generate --contract contracts\filmes.odcs.yaml --all-tables
+```
+As chaves estrangeiras da DDL (`REFERENCES` na coluna ou `FOREIGN KEY ... REFERENCES` da tabela, inclusive compostas)
+viram `relationships` no contrato (`type: foreignKey`, `to: tabela.coluna`). O framework valida que a coluna
+referenciada existe quando a tabela está no mesmo contrato e documenta a relação na seção 8 do SDD. Sai um
+`ingestion.yml` por tabela e um projeto de transformação com todas elas.
+
 **Várias tabelas no mesmo projeto de transformação:** gere a primeira normalmente e as próximas com `--append`
 (use a mesma linguagem).
 

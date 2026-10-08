@@ -356,6 +356,8 @@ def transform_gen_agent(state: FrameworkState) -> FrameworkState:
         partition_source_raw=partition_source["raw_field"] if partition_source else "",
         encrypted=[s for s in specs if s["encrypted"]],
         cents=[s for s in specs if s["transformation"] == "centavos"],
+        relationships=[{"raw": f["raw_field"], "staging": f["staging_field"], "to": f["references"]}
+                       for f in schema["fields"] if f.get("references")],
     )
 
     project_name = f"{dataset}-transformation"

@@ -20,8 +20,8 @@ import yaml
 
 from framework.cli import _initial_state
 from framework.ingestion_config import placeholders
-from framework.parsers.contract_parser import custom_props, load_contract
-from framework.parsers.ddl_parser import parse_ddl
+from framework.parsers.contract_parser import custom_props, load_contract, relationships_of
+from framework.parsers.ddl_parser import parse_ddl_tables
 from framework.standards.nomenclatura import validate_naming
 from framework.standards.sources import SOURCES, get_source
 
@@ -80,13 +80,21 @@ def _logical(spark_type: str) -> str:
 
 # ── Entrada das colunas ────────────────────────────────────────────────
 
-def columns_from_ddl(ddl: str, source_type: str = "postgres") -> tuple[dict, list[dict]]:
-    """DDL (CREATE TABLE) → (campos do formulário, linhas de colunas)."""
-    schema = parse_ddl(ddl, type_map=dict(get_source(source_type).type_overrides))
+def ddl_tables(ddl: str) -> list[str]:
+    """Nomes das tabelas de um script DDL (um ou vários CREATE TABLE)."""
+    return [s["table_name"] for s in parse_ddl_tables(ddl)]
+
+
+def columns_from_ddl(ddl: str, source_type: str = "postgres", table: str = "") -> tuple[dict, list[dict]]:
+    """DDL (CREATE TABLE) → (campos do formulário, linhas de colunas). Com vários CREATE TABLE, escolha a tabela."""
+    schemas = parse_ddl_tables(ddl, type_map=dict(get_source(source_type).type_overrides))
+    schema = next((s for s in schemas if s["table_name"].lower() == table.lower()), None) if table else schemas[0]
+    if schema is None:
+        raise ValueError(f"Tabela '{table}' não está na DDL. Tabelas: {', '.join(s['table_name'] for s in schemas)}")
     rows = [{
         "name": f["raw_field"], "physicalType": f["raw_type"], "logicalType": _logical(f["data_type"]),
         "primaryKey": f["is_pk"], "required": not f["nullable"], "partitioned": False, "encrypt": False,
-        "description": f["comment"],
+        "description": f["comment"], "references": f.get("references", ""),
     } for f in schema["fields"]]
     # Sugestão de coluna incremental: o primeiro candidato de data do DDL
     for r in rows:
@@ -132,6 +140,7 @@ def form_from_contract(text: str, table: str = "") -> tuple[dict, list[dict], li
         "required": bool(p.get("required")), "partitioned": bool(p.get("partitioned")),
         "encrypt": str(custom_props(p).get("encrypt", "")).lower() == "true" or custom_props(p).get("encrypt") is True,
         "description": p.get("description", ""), "stagingName": custom_props(p).get("stagingName", ""),
+        "references": next(iter(relationships_of(p)), ""),
     } for p in t["properties"]]
     return form, server_rows, columns
 
@@ -163,6 +172,26 @@ def _server_schema(form: dict, source_type: str) -> str:
     physical = str(form.get("physicalName") or "")
     return (str(form.get("schema") or "").strip() or (physical.split(".")[0] if "." in physical else "")
             or _DEFAULT_SCHEMA[source_type])
+
+
+def contract_from_ddl(ddl: str, form: dict, servers: list[dict]) -> dict:
+    """DDL com uma ou várias tabelas → um data contract com todas elas e as FKs em relationships.
+
+    Tabela sem coluna de data na origem vira carga full; com data, incremental pela primeira coluna de data.
+    """
+    source_type = form.get("sourceType", "postgres")
+    tables = []
+    for name in ddl_tables(ddl):
+        table_form, rows = columns_from_ddl(ddl, source_type, name)
+        incremental = [r["name"] for r in rows if r["partitioned"]]
+        merged = {**empty_form(), **form, **table_form, "loadMode": "incremental" if incremental else "full",
+                  "incrementalColumns": incremental}
+        tables.append(build_contract(merged, servers, rows)["schema"][0])
+    contract = build_contract({**empty_form(), **form, "table": tables[0]["name"]}, servers, [{"name": "x"}])
+    contract["schema"] = tables
+    contract["name"] = str(form.get("dataset", "")).strip().lower()
+    load_contract(dump_contract(contract))  # valida estrutura e relationships
+    return contract
 
 
 def build_contract(form: dict, servers: list[dict], columns: list[dict], naming: dict[str, dict] | None = None) -> dict:
@@ -205,6 +234,8 @@ def build_contract(form: dict, servers: list[dict], columns: list[dict], naming:
             "partitionKeyPosition": 1 if c.get("partitioned") else None,
             "description": (review.get("comment") or c.get("description") or "").strip(),
             "classification": "restricted" if c.get("encrypt") else None,
+            "relationships": [{"type": "foreignKey", "to": str(c["references"]).strip()}]
+            if str(c.get("references") or "").strip() else None,
             "customProperties": _props({
                 "encrypt": bool(c.get("encrypt")),
                 "stagingName": (review.get("staging_field") or c.get("stagingName") or "").strip(),
