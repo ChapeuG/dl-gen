@@ -9,9 +9,7 @@ não precisa de st.rerun().
 
 from __future__ import annotations
 
-import io
 import math
-import zipfile
 
 import pandas as pd
 import streamlit as st
@@ -555,17 +553,6 @@ def step_validation():
 
 # ── Etapa 4: Geração ───────────────────────────────────────────────────
 
-def _zip(base, files: list[str], contract_path) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(contract_path, contract_path.relative_to(base).as_posix())
-        for rel in files:
-            path = base / rel
-            if path.exists():
-                zf.write(path, rel)
-    return buf.getvalue()
-
-
 def step_generation():
     dataset, table = ss.form["dataset"], ss.form["table"]
     if ss.result is None:
@@ -581,8 +568,8 @@ def step_generation():
                 f"- `contracts/{dataset}/{table}.odcs.yaml` — o data contract\n"
                 f"- `ingestion-config/{dataset}/{table}.ingestion.yml` — para o orquestrador\n"
                 f"- `{dataset}-transformation/` — projeto "
-            f"{service.LANGUAGE_LABELS[ss.form.get('transformationLanguage') or 'pyspark']} da transformação "
-            "(com git init)\n"
+                f"{service.LANGUAGE_LABELS[ss.form.get('transformationLanguage') or 'pyspark']} da transformação "
+                "(com git init)\n"
                 "- `naming/` — nomenclatura revisada")
         bad_prefix = bool(ss.get("publish")) and not str(ss.get("publish_prefix", "")).startswith("s3://")
         nav = st.container(horizontal=True)
@@ -595,7 +582,7 @@ def step_generation():
     st.success(f"Pronto! {len(r.files) + 1} arquivos gravados em `{r.output_dir}`.")
     for uri in r.published:
         st.info(f"Enviado para {uri}")
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     with c1:
         st.download_button("Data contract (.odcs.yaml)", r.contract_path.read_bytes(), r.contract_path.name,
                            icon=":material/download:", use_container_width=True)
@@ -604,9 +591,6 @@ def step_generation():
         if ingestion:
             st.download_button("ingestion.yml", (r.output_dir / ingestion).read_bytes(), ingestion.split("/")[-1],
                                icon=":material/download:", use_container_width=True)
-    with c3:
-        st.download_button("Tudo (.zip)", _zip(r.output_dir, r.files, r.contract_path), f"{dataset}-{table}.zip",
-                           icon=":material/folder_zip:", use_container_width=True)
     st.markdown("**Próximos passos:** envie o `ingestion.yml` ao S3 lido pelo orquestrador (se ainda não enviou) e "
                 f"suba o projeto `{dataset}-transformation`.")
     with st.expander("Arquivos gerados"):

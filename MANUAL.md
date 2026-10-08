@@ -57,7 +57,7 @@ O navegador abre em `http://localhost:8501` com uma linha do tempo de 4 etapas:
 | **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, o **projeto de transformação** (PySpark ou Scala), origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
 | **2. Campos** | Recebe os campos com o **nome na staging** e a descrição propostos para a transformação. Edite o que quiser direto na tabela. |
 | **3. Validação** | Vê um checklist (✅ ok, ⚠️ aviso, ❌ erro) e a prévia do contrato, do `ingestion.yml` e da transformação. Com erro, o botão de gerar fica bloqueado. |
-| **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato, o `ingestion.yml` ou tudo em `.zip`. |
+| **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato ou o `ingestion.yml`. |
 
 O que é gravado na pasta de saída: `contracts/<dataset>/<tabela>.odcs.yaml`, `ingestion-config/...`,
 `<dataset>-transformation/` e `naming/`. Para usar LLM na nomenclatura, informe o modelo na barra lateral
@@ -71,15 +71,15 @@ O passo a passo abaixo faz a mesma coisa pela linha de comando.
 
 ### Passo 1 — Escrever o contrato da tabela
 
-O template e os exemplos ficam no projeto do orquestrador:
+O template do contrato fica no projeto do orquestrador:
 
 ```powershell
 git clone https://github.com/ChapeuG/ingestion-orchestrator.git
 cd ingestion-orchestrator
-python scripts\novo_contrato.py sakila actor --domain exemplos
+python scripts\novo_contrato.py <dataset> <tabela> --domain <area>
 ```
 
-Isso cria `contracts\sakila\actor.odcs.yaml`. Abra o arquivo e troque tudo que está como `<...>`. Os comentários
+Isso cria `contracts\<dataset>\<tabela>.odcs.yaml`. Abra o arquivo e troque tudo que está como `<...>`. Os comentários
 explicam cada campo: `[OBRIGATÓRIO]` precisa ser preenchido, `[EXT]` é uma regra nossa.
 
 O mínimo que o contrato precisa ter:
@@ -93,7 +93,7 @@ O mínimo que o contrato precisa ter:
 | Coluna de data para a carga incremental | `partitioned: true` |
 | Coluna de partição da raw | `rawPartitionColumn` (sem valor padrão) |
 
-Para editar visualmente (opcional): `npx datacontract-editor contracts\sakila\actor.odcs.yaml`.
+Para editar visualmente (opcional): `npx datacontract-editor contracts\<dataset>\<tabela>.odcs.yaml`.
 
 ### Passo 2 — Gerar
 
@@ -102,12 +102,10 @@ passe o **caminho completo** do contrato:
 
 ```powershell
 cd C:\trabalho\minha-tabela
-dl-gen generate --contract C:\caminho\do\ingestion-orchestrator\contracts\sakila\actor.odcs.yaml
+dl-gen generate --contract C:\caminho\do\ingestion-orchestrator\contracts\<dataset>\<tabela>.odcs.yaml
 ```
 
 > Erro `Path '...' does not exist`: o caminho relativo não existe na pasta onde o terminal está. Use o caminho completo.
-
-Modelo pronto para testar: `framework\exemplos\cred_final.odcs.yaml` (gerado a partir de `exemplos\cred_final.sql`).
 
 Sai isto na pasta atual:
 
@@ -163,11 +161,10 @@ sakila-transformation\
   datalake\utils\, datalake\error\           ← utilitários (Delta MERGE, Hive, enrichment, SQS...)
 ```
 
-Para rodar no cluster:
+Para rodar no cluster, instale o pacote `datalake` com `pip install .` (bootstrap action do EMR, por exemplo) e:
 
 ```bash
-zip -r datalake.zip datalake
-spark-submit --packages io.delta:delta-spark_2.12:3.3.0 --py-files datalake.zip main.py --table_name actor --data_source s3://<raw>/sakila/actor/ --output_uri s3://<bucket>/<time>/sakila/actor
+spark-submit --packages io.delta:delta-spark_2.12:3.3.0 main.py --table_name actor --data_source s3://<raw>/sakila/actor/ --output_uri s3://<bucket>/<time>/sakila/actor
 ```
 
 Em **Scala** (`--language scala`, ou `transformationLanguage: scala` nas `customProperties` do contrato):
@@ -192,7 +189,7 @@ O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeComm
 
 **Sem contrato, só com o DDL** (o que o DDL não informa vai por opção):
 ```powershell
-dl-gen generate --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql --dataset previsao --merge-keys cd_credenciadora,nm_produto,data
+dl-gen generate --ddl C:\caminho\da\tabela.sql --dataset <dataset> --merge-keys <coluna1>,<coluna2>
 ```
 No modo contrato, o yml sai com `PREENCHER` onde faltar informação (servidor, secret, destino). Por isso, para a
 ingestão nova, prefira o contrato.
@@ -205,8 +202,8 @@ variável `$DL_LANGUAGE` ou a propriedade `transformationLanguage` do contrato (
 
 **Só o bloco de campos para colar num model existente** (`FieldSpec` em PySpark; `ModelField` em Scala):
 ```powershell
-dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o fields.py
-dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql --language scala -o Field.scala
+dl-gen campos --ddl C:\caminho\da\tabela.sql -o fields.py
+dl-gen campos --ddl C:\caminho\da\tabela.sql --language scala -o Field.scala
 ```
 
 ---
@@ -299,4 +296,3 @@ python -m pytest tests -q
 | `src/framework/llm.py` | Modelos de LLM (inclui o LiteLLM) |
 | `src/framework/standards/` | Padrão de nomenclatura, glossário, tipagem e bancos de origem |
 | `src/framework/templates/` | Templates dos projetos gerados |
-| `exemplos/` | DDLs de exemplo e o modelo de contrato `cred_final.odcs.yaml` |

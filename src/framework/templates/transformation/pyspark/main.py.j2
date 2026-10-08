@@ -3,9 +3,8 @@ r"""Entry point da transformacao {{ dataset }}.
 Le os parametros (--chave valor), seleciona o processor pelo --table_name e reporta
 erros classificados para o SQS (--sqs_arn, opcional).
 
-Execucao:
-    zip -r datalake.zip datalake
-    spark-submit --packages io.delta:delta-spark_2.12:3.3.0 --py-files datalake.zip main.py \
+Execucao (o pacote datalake fica instalado no cluster: pip install .):
+    spark-submit --packages io.delta:delta-spark_2.12:3.3.0 main.py \
         --table_name <tabela> --data_source s3://<raw>/... --output_uri s3://<bucket>/<team>/<dataset>/<tabela>
 """
 
