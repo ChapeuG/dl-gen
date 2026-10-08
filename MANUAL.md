@@ -54,7 +54,7 @@ O navegador abre em `http://localhost:8501` com uma linha do tempo de 4 etapas:
 
 | Etapa | O que você faz |
 |---|---|
-| **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, o **projeto de transformação** (PySpark ou Scala), origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
+| **1. Contrato** | Traz as colunas colando uma DDL, uma query ou um schema, abrindo um arquivo com os campos (Avro, JSON Schema, planilha, parquet...) ou um `.odcs.yaml` (veja a seção 4), e preenche dataset, o **projeto de transformação** (PySpark ou Scala), origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
 | **2. Campos** | Recebe os campos com o **nome na staging** e a descrição propostos para a transformação. Edite o que quiser direto na tabela. |
 | **3. Validação** | Vê um checklist (✅ ok, ⚠️ aviso, ❌ erro) e a prévia do contrato, do `ingestion.yml` e da transformação. Com erro, o botão de gerar fica bloqueado. |
 | **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato ou o `ingestion.yml`. |
@@ -191,6 +191,25 @@ O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeComm
 ```powershell
 dl-gen generate --ddl C:\caminho\da\tabela.sql --dataset <dataset> --merge-keys <coluna1>,<coluna2>
 ```
+
+**Sem DDL: query, schema ou arquivo com os campos.** O `--ddl` (ou `--schema`, é a mesma opção) aceita qualquer
+arquivo que traga o nome e o tipo dos campos. O framework converte para DDL e segue igual. No Studio, cole o texto
+ou use a aba "Abrir arquivo com os campos".
+
+| Entrada | Exemplo | De onde vem o tipo |
+|---|---|---|
+| Query (`.sql`) | `SELECT CAST(id AS INT) AS id, valor::numeric(12,2) FROM vendas` | `CAST`, `::`, `CONVERT` |
+| Avro (`.avsc`) | `{"type": "record", "fields": [...]}` | tipos e `logicalType` |
+| JSON Schema / StructType do Spark (`.json`) | `{"properties": {...}}` / `df.schema.json()` | `type` e `format` |
+| Lista de campos (`.csv`, `.xlsx`, `.md`, saída de `DESCRIBE`) | `Campo;Tipo;Descrição;PK` | coluna de tipo |
+| Arquivo de dados (`.parquet`, `.csv`) | uma amostra da tabela | inferido |
+
+```powershell
+dl-gen generate --schema C:\caminho\vendas.avsc --dataset vendas
+dl-gen contrato --schema C:\caminho\campos.xlsx --dataset vendas --source-db postgres
+```
+Coluna de query sem `CAST` vira texto, com um aviso no comentário; `SELECT *` é recusado. As regras completas estão
+na skill [`leitura-de-schema`](src/framework/skills/leitura-de-schema/SKILL.md).
 No modo contrato, o yml sai com `PREENCHER` onde faltar informação (servidor, secret, destino). Por isso, para a
 ingestão nova, prefira o contrato.
 
@@ -226,14 +245,23 @@ dl-gen campos --ddl C:\caminho\da\tabela.sql --language scala -o Field.scala
 Sem LLM, os nomes saem de um glossário (heurística). Com LLM ficam melhores. O framework sempre confere o resultado
 contra o padrão de nomenclatura e, se o LLM falhar, volta para a heurística sozinho.
 
-- **LiteLLM:** a URL e a chave são lidas de `C:\Users\<matricula>\.claude\settings.json`, no bloco
+- **LiteLLM:** a chamada é feita pela lib oficial `openai` (`OpenAI(base_url=..., api_key=...)`), já que o LiteLLM
+  fala a API da OpenAI. A URL e a chave são lidas de `C:\Users\<matricula>\.claude\settings.json`, no bloco
   `env` (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`, ou `LITELLM_BASE_URL` + `LITELLM_API_KEY`)
   ou no `apiKeyHelper`.
   ```powershell
   dl-gen generate --contract actor.odcs.yaml --llm-model litellm:<modelo>
   ```
   Se o `settings.json` tiver `ANTHROPIC_MODEL`, o LLM liga sem precisar do `--llm-model`.
+
+  Para testar a conexão de verdade (URL, chave e modelo) sem gerar nada:
+  ```powershell
+  dl-gen llm --llm-model litellm:<modelo>
+  ```
 - **Outros provedores:** `--llm-model openai:gpt-4o-mini`, `anthropic:...`, `bedrock:...` (com a chave do provedor).
+
+O prompt enviado ao LLM está na skill [`nomenclatura`](src/framework/skills/nomenclatura/SKILL.md). Para mudar as
+instruções, edite esse arquivo (veja a seção 9).
 
 No fim da execução, a nomenclatura mostra a fonte usada: `contrato`, `arquivo`, `llm` ou `heuristica`.
 Na interface, a barra lateral mostra embaixo do campo do modelo se o LLM está configurado (URL do LiteLLM, pacote,
@@ -249,7 +277,7 @@ Com `--contract`, quase tudo vem do contrato. As opções servem para **sobrescr
 |---|---|---|
 | `--contract` | Data contract ODCS (`.odcs.yaml`) | — |
 | `--table` | Qual tabela do contrato (se tiver mais de uma) | a única |
-| `--ddl` | DDL `CREATE TABLE` (no lugar do contrato) | — |
+| `--ddl` / `--schema` | DDL `CREATE TABLE`, query ou arquivo com os campos (no lugar do contrato; veja a seção 4) | — |
 | `--publish-s3` | Envia o yml para este prefixo S3 | não envia |
 | `--dataset` | Nome do dataset | `dataProduct` do contrato (obrigatório com `--ddl`) |
 | `--source-db` | `postgres`, `oracle`, `mysql`, `sqlserver` | `servers[].type` do contrato |
@@ -288,7 +316,8 @@ Regras que o framework aplica sozinho:
 | Aviso de `PREENCHER` | Falta um campo obrigatório no contrato. Complete e gere de novo |
 | `O contrato tem N tabelas; informe --table` | Use `--table <nome>` |
 | Nome de coluna ruim | Corrija em `naming\<tabela>.json` (ou `stagingName` no contrato) e gere de novo |
-| `LLM indisponível` | A heurística assumiu. Confira a chave do LiteLLM no `settings.json` |
+| `LLM indisponível` | A heurística assumiu. Confira a chave do LiteLLM no `settings.json` e teste com `dl-gen llm` |
+| `Formato não reconhecido` | O arquivo do `--schema` precisa trazer nome e tipo dos campos. Formatos na seção 4 |
 
 ---
 
@@ -300,12 +329,32 @@ python -m pytest tests -q
 
 | Pasta/arquivo | O que tem |
 |---|---|
-| `src/framework/cli.py` | Comandos `generate`, `campos` e `ui` |
+| `src/framework/cli.py` | Comandos `generate`, `contrato`, `campos`, `llm`, `skills` e `ui` |
+| `src/framework/skills/` | Skills do agente: um `SKILL.md` por etapa (seção 9) |
 | `src/framework/ui/` | Interface: `app.py` (tela) e `service.py` (lógica testável) |
 | `src/framework/graph.py` | Fluxo (LangGraph): profiler → nomenclatura → ingestão ∥ transformação → validação |
-| `src/framework/parsers/` | Leitura do contrato (`contract_parser.py`), do DDL e da amostra |
+| `src/framework/parsers/` | Leitura do contrato (`contract_parser.py`), do DDL, dos outros formatos de schema (`schema_reader.py`) e da amostra |
 | `src/framework/agents/` | Uma etapa por arquivo (`input_gen.py` gera o ingestion.yml) |
 | `src/framework/ingestion_config.py` | Formato do `ingestion.yml` |
-| `src/framework/llm.py` | Modelos de LLM (inclui o LiteLLM) |
+| `src/framework/llm.py` | Modelos de LLM (o LiteLLM pela lib `openai`) |
 | `src/framework/standards/` | Padrão de nomenclatura, glossário, tipagem e bancos de origem |
 | `src/framework/templates/` | Templates dos projetos gerados |
+
+---
+
+## 9. Skills do agente
+
+O que cada etapa sabe fazer fica em **[`src/framework/skills/`](src/framework/skills/README.md)**, um `SKILL.md`
+por skill:
+
+| Skill | O que faz |
+|---|---|
+| [`leitura-de-schema`](src/framework/skills/leitura-de-schema/SKILL.md) | Lê campos e tipos de DDL, query, Avro, JSON Schema, StructType, planilha, parquet ou CSV |
+| [`nomenclatura`](src/framework/skills/nomenclatura/SKILL.md) | Nome na staging e descrição de cada campo (é o prompt do LLM) |
+| [`ingestao`](src/framework/skills/ingestao/SKILL.md) | Regras do `ingestion.yml` |
+| [`transformacao`](src/framework/skills/transformacao/SKILL.md) | Estrutura e regras do projeto de transformação |
+| [`sdd`](src/framework/skills/sdd/SKILL.md) | Seções do SDD |
+
+A de nomenclatura é lida em tempo de execução: editar o `SKILL.md` muda o que o LLM recebe, sem mexer no código. As
+outras documentam as regras que o código aplica. Para listar: `dl-gen skills`. No Studio, a barra lateral mostra as
+skills em "Skills do agente".

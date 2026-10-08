@@ -22,6 +22,7 @@ from framework.cli import _initial_state
 from framework.ingestion_config import placeholders
 from framework.parsers.contract_parser import check_relationships, custom_props, load_contract, relationships_of
 from framework.parsers.ddl_parser import parse_ddl_tables
+from framework.parsers.schema_reader import read_schema
 from framework.standards.nomenclatura import validate_naming
 from framework.standards.sources import SOURCES, get_source
 
@@ -80,14 +81,19 @@ def _logical(spark_type: str) -> str:
 
 # ── Entrada das colunas ────────────────────────────────────────────────
 
+def schema_to_ddl(source: str | bytes, filename: str = "") -> str:
+    """DDL, query, JSON (Avro, JSON Schema, StructType), lista de campos, planilha ou arquivo de dados → DDL."""
+    return read_schema(source, filename)
+
+
 def ddl_tables(ddl: str) -> list[str]:
-    """Nomes das tabelas de um script DDL (um ou vários CREATE TABLE)."""
-    return [s["table_name"] for s in parse_ddl_tables(ddl)]
+    """Nomes das tabelas de um script DDL (um ou vários CREATE TABLE), query ou schema."""
+    return [s["table_name"] for s in parse_ddl_tables(read_schema(ddl))]
 
 
 def columns_from_ddl(ddl: str, source_type: str = "postgres", table: str = "") -> tuple[dict, list[dict]]:
-    """DDL (CREATE TABLE) → (campos do formulário, linhas de colunas). Com vários CREATE TABLE, escolha a tabela."""
-    schemas = parse_ddl_tables(ddl, type_map=dict(get_source(source_type).type_overrides))
+    """DDL (ou query/schema) → (campos do formulário, linhas de colunas). Com várias tabelas, escolha a tabela."""
+    schemas = parse_ddl_tables(read_schema(ddl), type_map=dict(get_source(source_type).type_overrides))
     schema = next((s for s in schemas if s["table_name"].lower() == table.lower()), None) if table else schemas[0]
     if schema is None:
         raise ValueError(f"Tabela '{table}' não está na DDL. Tabelas: {', '.join(s['table_name'] for s in schemas)}")
@@ -181,6 +187,7 @@ def contracts_from_ddl(ddl: str, form: dict, servers: list[dict]) -> list[dict]:
     Tabela sem coluna de data na origem vira carga full; com data, incremental pela primeira coluna de data.
     """
     source_type = form.get("sourceType", "postgres")
+    ddl = read_schema(ddl)
     contracts = []
     for name in ddl_tables(ddl):
         table_form, rows = columns_from_ddl(ddl, source_type, name)

@@ -17,6 +17,7 @@ from rich.panel import Panel
 from framework.agents.transform_gen import resolve_language
 from framework.graph import build_graph
 from framework.llm import DEFAULT_MODEL_ENV, resolve_model_name
+from framework.parsers.schema_reader import read_schema
 from framework.parsers.contract_parser import check_relationships, custom_props, load_contract, resolve_table
 from framework.standards.sources import SOURCES
 from framework.state import FrameworkState
@@ -63,10 +64,19 @@ def naming_options(f):
     f = click.option("--contract", "contract_path", required=False, type=click.Path(exists=True),
                      help="Data contract ODCS (.odcs.yaml). Substitui o --ddl e preenche dataset, banco, partição, "
                           "merge e criptografia (flags informadas prevalecem)")(f)
-    f = click.option("--ddl", required=False, type=click.Path(exists=True), help="Caminho do arquivo DDL (.sql)")(f)
+    f = click.option("--ddl", "--schema", "ddl", required=False, type=click.Path(exists=True, dir_okay=False),
+                     help="DDL (.sql) ou qualquer arquivo com nome e tipo dos campos: query SELECT, Avro/JSON Schema/StructType (.json), lista de campos (.csv, .xlsx, .md) ou dados (.parquet, .csv)")(f)
     f = click.option("--tipagem", "tipagem_path", envvar="DL_TIPAGEM", required=False, type=click.Path(exists=True),
                      help="Planilha Tipagem.xlsx (Tipo Origem → Tipo Final). Default: $DL_TIPAGEM; sem ela vale a tabela oficial embutida")(f)
     return f
+
+
+def _read_fields(path: str) -> str:
+    """Arquivo de entrada (DDL, query, JSON, planilha, parquet...) → DDL."""
+    try:
+        return read_schema(Path(path))
+    except (ValueError, UnicodeDecodeError) as e:
+        raise click.UsageError(f"{path}: {e}") from None
 
 
 def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None, tipagem_path: str | None,
@@ -107,7 +117,7 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
         raise click.UsageError(str(e)) from None
 
     return {
-        "ddl": Path(ddl).read_text(encoding="utf-8") if ddl else "",
+        "ddl": _read_fields(ddl) if ddl else "",
         "contract": contract_text,
         "contract_table": contract_table,
         "sample_path": sample_path or "",
@@ -190,7 +200,8 @@ def _contract_targets(contract_path: str) -> list[tuple[str, str]]:
 
 
 @main.command()
-@click.option("--ddl", required=True, type=click.Path(exists=True), help="DDL com um ou vários CREATE TABLE")
+@click.option("--ddl", "--schema", "ddl", required=True, type=click.Path(exists=True, dir_okay=False),
+              help="DDL com um ou vários CREATE TABLE, ou outro arquivo com nome e tipo dos campos (veja generate --help)")
 @click.option("--dataset", required=True, help="Nome do dataset (dataProduct do contrato)")
 @click.option("--source-db", default="postgres", show_default=True,
               type=click.Choice(sorted(SOURCES), case_sensitive=False), help="Banco de origem")
@@ -213,7 +224,7 @@ def contrato(ddl: str, dataset: str, source_db: str, raw_partition_column: str, 
             "transformationLanguage": language.lower()}
     servers = [{"environment": environment, "host": host, "port": port, "database": database, "secretId": secret_id}]
     try:
-        contracts = service.contracts_from_ddl(Path(ddl).read_text(encoding="utf-8"), form, servers)
+        contracts = service.contracts_from_ddl(_read_fields(ddl), form, servers)
     except ValueError as e:
         raise click.ClickException(str(e)) from None
 
@@ -371,6 +382,35 @@ def generate(ctx: click.Context, sample_path: str | None, dataset: str | None, p
     except Exception as e:
         console.print(f"\n[bold red]Erro:[/bold red] {e}")
         sys.exit(1)
+
+
+@main.command()
+@click.option("--llm-model", default=None, envvar=DEFAULT_MODEL_ENV,
+              help="Modelo a testar (ex: litellm:<modelo>). Default: $DL_LLM_MODEL ou ANTHROPIC_MODEL do settings.json")
+def llm(llm_model: str | None):
+    """Testa o LLM de verdade: confere a configuração e faz uma chamada curta (LiteLLM pela lib openai)."""
+    from framework.llm import check_model, ping
+
+    model = resolve_model_name(llm_model)
+    level, message = check_model(model)
+    console.print(f"Modelo: {model or '(nenhum)'}\nConfiguração: {message}")
+    if level in ("off", "error"):
+        sys.exit(1)
+    try:
+        console.print(f"[green]Resposta do LLM:[/green] {ping(model)}")
+    except Exception as e:  # rede, chave recusada, modelo inexistente no proxy...
+        console.print(f"[bold red]Falhou:[/bold red] {type(e).__name__}: {e}")
+        sys.exit(1)
+
+
+@main.command()
+def skills():
+    """Lista as skills do agente (pasta src/framework/skills): o que cada etapa sabe fazer."""
+    from framework.skills import SKILLS_DIR, list_skills
+
+    console.print(f"[cyan]Skills em {SKILLS_DIR}[/cyan]\n")
+    for skill in list_skills():
+        console.print(f"[bold]{skill.name}[/bold]  ({skill.agent})\n  {skill.description}\n  {skill.path}\n")
 
 
 @main.command()

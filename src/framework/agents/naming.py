@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from framework.agents.transform_gen import _default_transformation
 from framework.llm import get_chat_model
+from framework.skills import load_skill
 from framework.standards.glossary import propose_field
 from framework.standards.nomenclatura import (
     RESERVED_STAGING,
@@ -59,49 +60,10 @@ class NamingProposal(BaseModel):
     fields: list[FieldNaming]
 
 
-SYSTEM_PROMPT = """Você é especialista em Governança de Dados da empresa e gera declarações de campos \
-FieldSpec em PySpark seguindo os padrões de nomenclatura e tipagem do Data Lake.
-
-Formato final de cada campo (gerado pelo framework a partir da sua resposta):
-FieldSpec("nome_original", "nome_padronizado", TipoSpark(), "Descrição clara e objetiva do campo")
-
-Regras de geração:
-1. rawField: utilize o nome original do campo conforme aparece no DDL, sem alterações.
-2. stagingField:
-   - Traduza o campo original para o português.
-   - Utilize o nome padronizado conforme o documento "Padrões Para Criação de Especificações" abaixo:
-     natureza_termoessencial_qualificador1..., caixa baixa, português, por extenso, no singular, sem acentos,
-     sem preposições/artigos/conectivos.
-   - A natureza é obrigatória e deve ser uma das abreviações do Quadro de Naturezas.
-   - Exemplo: name vira nm_nome; created_at vira dh_criacao; trade_name vira nm_fantasia.
-   - Siglas consagradas (cpf, cnpj, bin, ec, mcc...) podem ser mantidas.
-   - Se o campo original já estiver no padrão (ex: cd_credenciadora), mantenha-o.
-   - Nunca use os nomes reservados (colunas de controle já existentes): {reservados}.
-   - Cada stagingField deve ser único na tabela.
-3. dataType: é mapeado pelo framework a partir da planilha Tipagem.xlsx — use-o apenas para escolher a natureza
-   (ex: TimestampType → dh, DateType → dt, BooleanType → in, valores monetários → vl).
-4. comment: descrição clara e objetiva com base no nome do campo traduzido, em português com acentuação correta.
-   Ex: nm_usuario → "Nome do usuário." Se o DDL trouxer comentário, use-o como base.
-
-Quadro de Naturezas:
-{naturezas}
-
-Documento de padrões de nomenclatura:
-<padroes>
-{padroes}
-</padroes>"""
-
-HUMAN_PROMPT = """Tabela de origem: {source_table}
-Dataset: {dataset}
-Comentário da tabela no DDL: {table_comment}
-
-Campos para padronizar (rawField | tipo SQL | dataType | restrições | comentário DDL | exemplos de valores):
-{campos}
-
-Nomes já definidos nesta tabela (não repita estes stagingField):
-{ja_definidos}
-
-{erros}Retorne um item para cada campo listado em "Campos para padronizar"."""
+# Prompts na skill de nomenclatura (skills/nomenclatura/SKILL.md): edite lá para mudar o comportamento do LLM
+_SKILL = load_skill("nomenclatura")
+SYSTEM_PROMPT = _SKILL.section("Prompt do sistema")
+HUMAN_PROMPT = _SKILL.section("Prompt do pedido")
 
 NAMING_PROMPT = ChatPromptTemplate.from_messages([("system", SYSTEM_PROMPT), ("human", HUMAN_PROMPT)])
 

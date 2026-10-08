@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from pathlib import Path
+
+from framework.skills import load_skill
 
 # Quadro de Naturezas (abreviação → significado)
 NATUREZAS: dict[str, str] = {
@@ -64,7 +65,7 @@ STAGING_RE = re.compile(r"^[a-z]{2}(_[a-z0-9]+)+$")
 @lru_cache(maxsize=1)
 def load_padroes_text() -> str:
     """Texto do padrão de nomenclatura compactado (sem espaços repetidos nem seção de aprovações)."""
-    text = (Path(__file__).parent / "padrao_nomenclatura.txt").read_text(encoding="utf-8")
+    text = load_skill("nomenclatura").reference("padrao_nomenclatura.txt").read_text(encoding="utf-8")
     cut = text.find("Controle e Histórico de Versões\nData")
     if cut > 0:
         text = text[:cut]

@@ -34,7 +34,7 @@ def test_full_flow(tmp_path):
 
     # Etapa 1 — importa a DDL e preenche o obrigatório
     at.text_area[0].set_value(DDL).run()
-    _button(at, "Importar colunas da DDL").click().run()
+    _button(at, "Importar colunas").click().run()
     assert [c["name"] for c in at.session_state.columns] == ["id", "nu_cpf", "nome", "created_at"]
     assert _button(at, "Próximo: campos").disabled  # falta o dataset
 
@@ -73,7 +73,7 @@ def test_full_flow(tmp_path):
 def test_validation_blocks_generation_without_secret():
     at = AppTest.from_file(APP, default_timeout=60).run()
     at.text_area[0].set_value(DDL).run()
-    _button(at, "Importar colunas da DDL").click().run()
+    _button(at, "Importar colunas").click().run()
     _text(at, "Dataset").set_value("vendas").run()
     _text(at, "Coluna de partição da raw").set_value("dt_ingestao").run()
     _button(at, "Próximo: campos").click().run()
