@@ -140,3 +140,15 @@ def test_generate_without_folder_uses_default(tmp_path, monkeypatch):
     r = service.generate(service.build_contract(form, servers, rows), "  ")
     assert r.output_dir == tmp_path / "padrao"
     assert (tmp_path / "padrao" / "contracts" / "vendas" / "cliente.odcs.yaml").exists()
+
+
+def test_language_round_trips_through_contract(tmp_path):
+    form, servers, rows = _filled()
+    contract = service.build_contract({**form, "transformationLanguage": "scala"}, servers, rows)
+    text = service.dump_contract(contract)
+    assert "transformationLanguage" in text
+    assert service.form_from_contract(text)[0]["transformationLanguage"] == "scala"
+    r = service.generate(contract, str(tmp_path))
+    assert (tmp_path / "vendas-transformation" / "build.sbt").exists()
+    assert not (tmp_path / "vendas-transformation" / "main.py").exists()
+    assert r.files

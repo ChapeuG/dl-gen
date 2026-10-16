@@ -70,6 +70,7 @@ class ParsedColumn:
     is_pk: bool
     is_fk: bool
     comment: str
+    references: str = ""  # FK: "tabela.coluna" referenciada
 
 
 def _parse_type(raw_type: str, type_map: dict[str, str] | None = None) -> str:
@@ -149,6 +150,45 @@ def _extract_comment(col_def: str) -> str:
     return ""
 
 
+_CREATE_RE = re.compile(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([^\s(]+)", re.IGNORECASE)
+_FK_RE = re.compile(r"foreign\s+key\s*\(([^)]+)\)\s*references\s+([^\s(]+)\s*\(([^)]+)\)", re.IGNORECASE)
+_INLINE_FK_RE = re.compile(r"references\s+([^\s(]+)\s*\(\s*[\"`]?(\w+)", re.IGNORECASE)
+
+
+def _ident(name: str) -> str:
+    return name.strip().strip('"').strip("`").strip("[]")
+
+
+def _reference(table: str, column: str) -> str:
+    """public.actor + id → actor.id (o contrato referencia a tabela pelo nome, sem o schema)."""
+    return f"{_ident(table.split('.')[-1])}.{_ident(column)}"
+
+
+def _table_fks(body: str) -> dict[str, str]:
+    """FOREIGN KEY (a, b) REFERENCES t (x, y) → {a: t.x, b: t.y} (constraints de tabela, inclusive compostas)."""
+    refs: dict[str, str] = {}
+    for m in _FK_RE.finditer(body):
+        local = [_ident(c) for c in m.group(1).split(",")]
+        remote = [_ident(c) for c in m.group(3).split(",")]
+        for col, ref_col in zip(local, remote):
+            refs[col] = _reference(m.group(2), ref_col)
+    return refs
+
+
+def split_ddl(ddl: str) -> list[str]:
+    """Separa um script com vários CREATE TABLE em um DDL por tabela (os comentários -- são removidos)."""
+    ddl = re.sub(r"--[^\n]*", "", ddl)
+    starts = [m.start() for m in _CREATE_RE.finditer(ddl)]
+    if not starts:
+        raise ValueError("DDL não contém 'CREATE TABLE'")
+    return [ddl[a:b] for a, b in zip(starts, starts[1:] + [len(ddl)])]
+
+
+def parse_ddl_tables(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | None = None) -> list[SchemaInfo]:
+    """Todas as tabelas do script, na ordem em que aparecem."""
+    return [parse_ddl(part, dataset, type_map) for part in split_ddl(ddl)]
+
+
 def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | None = None) -> SchemaInfo:
     """Faz parse de um DDL CREATE TABLE e retorna SchemaInfo.
 
@@ -163,18 +203,16 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
     # Remove comentários de linha (-- ...)
     ddl = re.sub(r"--[^\n]*", "", ddl)
 
-    # Extrai nome da tabela: CREATE TABLE [schema.]tabela (
-    table_match = re.search(
-        r"create\s+table\s+(?:if\s+not\s+exists\s+)?([^\s(]+)",
-        ddl, re.IGNORECASE
-    )
+    # Extrai nome da tabela: CREATE TABLE [schema.]tabela (  — com vários CREATE TABLE, vale o primeiro
+    ddl = split_ddl(ddl)[0]
+    table_match = _CREATE_RE.search(ddl)
     if not table_match:
         raise ValueError("DDL não contém 'CREATE TABLE'")
 
     full_table = table_match.group(1)
     # source_table mantém o schema (ex: public.organizacao)
     source_table = full_table
-    table_name = full_table.split(".")[-1].strip('"').strip("`")
+    table_name = _ident(full_table.split(".")[-1])
 
     # Extrai o corpo entre parênteses (respeitando parênteses aninhados)
     try:
@@ -210,6 +248,7 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
 
     columns: list[ParsedColumn] = []
     pk_fields: list[str] = []
+    table_fks = _table_fks(body)
 
     for line in lines:
         # Nome da coluna (pode estar entre aspas duplas)
@@ -235,8 +274,10 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
         if is_pk:
             pk_fields.append(col_name)
 
-        # REFERENCES (FK)?
-        is_fk = "references" in rest.lower()
+        # REFERENCES (FK): inline na coluna ou FOREIGN KEY da tabela
+        inline = _INLINE_FK_RE.search(rest)
+        references = _reference(inline.group(1), inline.group(2)) if inline else table_fks.get(col_name, "")
+        is_fk = bool(references) or "references" in rest.lower()
 
         # COMMENT
         comment = _extract_comment(rest) or column_comments.get(col_name, "")
@@ -249,13 +290,14 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
             is_pk=is_pk,
             is_fk=is_fk,
             comment=comment,
+            references=references,
         ))
 
     # Se não achou PK inline, procura por constraint separada
     if not pk_fields:
         pk_match = re.search(r"primary\s+key\s*\(([^)]+)\)", body, re.IGNORECASE)
         if pk_match:
-            pk_fields = [c.strip().strip('"') for c in pk_match.group(1).split(",")]
+            pk_fields = [_ident(c) for c in pk_match.group(1).split(",")]
 
     # Candidatos a partição (campos de data/timestamp)
     partition_candidates = [
@@ -268,7 +310,7 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
     # Constrói FieldDef list
     fields: list[FieldDef] = []
     for col in columns:
-        fields.append(FieldDef(
+        f = FieldDef(
             raw_field=col.name,
             staging_field=col.name,  # o agente de nomenclatura aplica o padrão de nomenclatura
             raw_type=col.raw_type,
@@ -278,7 +320,10 @@ def parse_ddl(ddl: str, dataset: str = "dataset", type_map: dict[str, str] | Non
             is_fk=col.is_fk,
             nullable=col.nullable,
             encrypt=False,  # definido por --encrypt ou pelo arquivo de nomenclatura
-        ))
+        )
+        if col.references:
+            f["references"] = col.references
+        fields.append(f)
 
     return SchemaInfo(
         table_name=table_name,

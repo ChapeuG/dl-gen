@@ -91,7 +91,37 @@ def load_contract(text: str) -> dict:
         for prop in table["properties"]:
             if not prop.get("name"):
                 raise ValueError(f"Contrato inválido: coluna sem 'name' na tabela {table['name']}")
+    check_relationships([contract])
     return contract
+
+
+def relationships_of(prop: dict) -> list[str]:
+    """relationships (ODCS v3.1+) da coluna → ["tabela.coluna", ...] das chaves estrangeiras."""
+    out = []
+    for rel in prop.get("relationships") or []:
+        if isinstance(rel, dict) and str(rel.get("type", "foreignKey")) == "foreignKey" and rel.get("to"):
+            out.append(str(rel["to"]).strip())
+    return out
+
+
+def check_relationships(contracts: list[dict]) -> None:
+    """Toda FK aponta para tabela.coluna; se a tabela estiver entre os contratos informados, a coluna precisa existir.
+
+    Com um contrato só, vale para as tabelas dele; com a pasta de contratos, as FKs são cruzadas entre os arquivos.
+    """
+    tables = [t for c in contracts for t in c["schema"]]
+    columns = {t["name"].lower(): {column_name(p).lower() for p in t["properties"]} | {p["name"].lower() for p in t["properties"]}
+               for t in tables}
+    for table in tables:
+        for prop in table["properties"]:
+            for ref in relationships_of(prop):
+                ref_table, _, ref_col = ref.rpartition(".")
+                where = f"{table['name']}.{prop['name']}"
+                if not ref_table or not ref_col:
+                    raise ValueError(f"Contrato inválido: relationships.to de {where} precisa ser tabela.coluna (recebido: {ref})")
+                target = ref_table.split(".")[-1].lower()
+                if target in columns and ref_col.lower() not in columns[target]:
+                    raise ValueError(f"Contrato inválido: {where} referencia {ref}, mas {ref_table} não tem a coluna {ref_col}")
 
 
 def select_table(contract: dict, table_name: str = "") -> dict:
@@ -167,10 +197,12 @@ def contract_to_schema(ct: ContractTable, dataset: str, type_map: dict[str, str]
             data_type=_spark_type(prop, type_map),
             comment=str(prop.get("description") or "").strip().replace('"', "'"),
             is_pk=raw in pk_fields,
-            is_fk=bool(prop.get("relationships")),
+            is_fk=bool(relationships_of(prop)),
             nullable=not prop.get("required", False) and not prop.get("primaryKey", False),
             encrypt=False,  # aplicado pelo Profiler a partir de encrypt_columns
         )
+        if relationships_of(prop):
+            f["references"] = relationships_of(prop)[0]
         if extra.get("stagingName"):
             f["contract_staging_field"] = str(extra["stagingName"]).strip().lower()
         fields.append(f)

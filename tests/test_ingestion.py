@@ -390,3 +390,58 @@ def test_validator_reports_python_syntax_errors(tmp_path):
     assert not result["transform_compiled"]
     assert result["compile_errors"][0]["file"] == "vendas-transformation/main.py"
     assert result["compile_errors"][0]["agent_origin"] == "transform_gen"
+
+
+# ── Linguagem da transformação (pyspark | scala) ───────────────────────
+
+def test_scala_transformation_follows_skills_structure():
+    state = _run(merge_keys=["id"], language="scala")
+    files = transform_gen_agent(state)["transform_files"]
+    base = "vendas-transformation/src/main/scala/br/com/datalake/"
+    for rel in ("Main.scala", "error/SparkErrorHandler.scala", "processor/cliente/ClienteModel.scala",
+                "processor/cliente/ClienteProcessor.scala", "utils/TableModel.scala", "utils/TransformColumn.scala",
+                "utils/DeltaWritePattern.scala", "utils/HiveTableManager.scala"):
+        assert base + rel in files, rel
+    assert "vendas-transformation/build.sbt" in files and "vendas-transformation/project/plugins.sbt" in files
+    assert not any(k.endswith(".py") for k in files)
+    assert "target/" in files["vendas-transformation/.gitignore"]
+
+    assert "case ClienteModel.tableName => ClienteProcessor.process(params)" in files[base + "Main.scala"]
+    processor = files[base + "processor/cliente/ClienteProcessor.scala"]
+    assert '.withColumn("dt_atualizacao_registro_particao", lit(runDateYyyymmdd))' in processor
+    model = files[base + "processor/cliente/ClienteModel.scala"]
+    assert 'override val mergeKeys: Seq[String] = Seq("id_cliente")' in model
+    assert 'FieldSpec("@timestamp", "dh_criacao_data_lake", TimestampType, ' in model
+    assert "DecimalType(12,2)" in model
+    assert "SaveMode.Overwrite" in files["vendas-transformation/docs_sdd/cliente_sdd_doc.md"]
+
+
+def test_scala_encrypted_field_and_field_block():
+    from framework.agents.transform_gen import render_field_block
+    state = _run(encrypt_columns=["nu_cpf"], language="scala")
+    model = _file(transform_gen_agent(state)["transform_files"], "ClienteModel.scala")
+    line = next(line for line in model.splitlines() if 'FieldSpec("nu_cpf"' in line)
+    assert ", StringType, " in line and "encrypted = true" in line and "transformation = None" in line
+
+    block = render_field_block(state["schema"], language="scala")
+    assert block.startswith("object Field {") and "= ModelField(rawField = " in block
+    assert render_field_block(state["schema"]).startswith("fields = [")  # padrão: pyspark
+
+
+def test_default_language_is_pyspark_and_invalid_fails():
+    files = transform_gen_agent(_run(merge_keys=["id"]))["transform_files"]
+    assert "vendas-transformation/main.py" in files
+    with pytest.raises(ValueError, match="java"):
+        transform_gen_agent(_run(merge_keys=["id"], language="java"))
+
+
+def test_validator_scala_without_sbt_writes_without_compiling(tmp_path, monkeypatch):
+    from framework.agents import validator
+
+    monkeypatch.setattr(validator.shutil, "which", lambda name: None)
+    state = _run(merge_keys=["id"], language="scala")
+    state.update(transform_gen_agent(state))
+    state.update({"output_dir": str(tmp_path), "dry_run": False})
+    result = validator.validator_agent(state)
+    assert result["validation_skipped"] == "sbt não encontrado no PATH"
+    assert (tmp_path / "vendas-transformation" / "build.sbt").exists()

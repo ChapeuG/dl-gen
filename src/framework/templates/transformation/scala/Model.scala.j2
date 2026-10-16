@@ -1,0 +1,45 @@
+package br.com.datalake.processor.{{ package }}
+
+import br.com.datalake.utils.{Enrichment, FieldSpec, NestedFieldSpec, TableModel}
+import org.apache.spark.sql.types._
+
+/**
+ * Modelo da tabela {{ table_name }} (SDD: docs_sdd/{{ table_name }}_sdd_doc.md).
+ * Objeto de configuracao puro — sem SparkSession, sem I/O.
+ */
+object {{ model }} extends TableModel {
+
+  override val tableName: String = "{{ table_name }}"
+  override val databaseName: String = "{{ database }}"
+  override val tableComment: String = "{{ table_comment }}"
+
+  override val fields: Seq[FieldSpec] = Seq(
+{% for f in fields %}
+    FieldSpec({{ f.args }}){% if not loop.last %},{% endif %}
+
+{% endfor %}
+  )
+
+  override val nestedFields: Seq[NestedFieldSpec] = Seq.empty
+
+  override val mergeKeys: Seq[String] = Seq({% for k in merge_keys %}"{{ k }}"{% if not loop.last %}, {% endif %}{% endfor %})
+
+  override val partitionColumns: Seq[String] = Seq({% for p in partitions %}"{{ p.name }}"{% if not loop.last %}, {% endif %}{% endfor %})
+
+  /** Coluna usada na deduplicacao: mantem o registro mais recente por chave de merge. */
+  override val timestampField: String = "{{ timestamp_field }}"
+
+  override val enrichments: Seq[Enrichment] = Seq.empty
+
+  override val columnComments: Map[String, String] =
+    fields.map(f => f.targetName -> f.comment).toMap ++ Map(
+{% for p in partitions %}
+      "{{ p.name }}" -> "{{ p.comment }}",
+{% endfor %}
+      "dh_criacao_registro" -> "Data e horario da criacao do registro na camada.",
+      "dh_atualizacao_registro" -> "Data e horario da ultima atualizacao do registro na camada."
+    )
+
+  /** Tamanho medio estimado de uma linha (bytes), usado no file sizing da primeira carga. */
+  val avgRowSize: Int = {{ avg_row_size }}
+}

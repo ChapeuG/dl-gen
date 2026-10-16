@@ -9,14 +9,13 @@ não precisa de st.rerun().
 
 from __future__ import annotations
 
-import io
 import math
-import zipfile
 
 import pandas as pd
 import streamlit as st
 
 from framework.llm import check_model, resolve_model_name
+from framework.skills import list_skills
 from framework.ui import service
 
 st.set_page_config(page_title="Data Contract Studio", page_icon=":material/contract:", layout="wide")
@@ -110,12 +109,25 @@ def cb_import_ddl():
     try:
         form, rows = service.columns_from_ddl(ss.get("ddl_text", ""), ss.form.get("sourceType", "postgres"))
     except ValueError as e:
-        _flash("error", f"Não consegui ler a DDL: {e}")
+        _flash("error", f"Não consegui ler os campos: {e}")
         return
     ss.form.update({k: v for k, v in form.items() if v and not ss.form.get(k)})
     ss.columns, ss.naming_rows = rows, []
-    _flash("success", f"{len(rows)} colunas importadas da DDL.")
+    _flash("success", f"{len(rows)} colunas importadas.")
     _go(0, reload_widgets=True)
+
+
+def cb_import_schema_file():
+    """Arquivo com os campos (query, JSON, planilha, parquet...) → DDL na caixa de texto, e importa as colunas."""
+    up = ss.get("schema_upload")
+    if up is None:
+        return
+    try:
+        ss.ddl_text = service.schema_to_ddl(up.getvalue(), up.name)
+    except (ValueError, UnicodeDecodeError) as e:
+        _flash("error", f"Não consegui ler {up.name}: {e}")
+        return
+    cb_import_ddl()
 
 
 def cb_load_contract():
@@ -297,13 +309,23 @@ def llm_status(model: str) -> tuple[str, str]:
 # ── Etapa 1: Contrato ──────────────────────────────────────────────────
 
 def step_contract():
-    with st.expander("Preencher a partir de uma DDL ou de um contrato existente", icon=":material/bolt:",
-                     expanded=not ss.columns):
-        tab_ddl, tab_contract = st.tabs(["Colar DDL (CREATE TABLE)", "Abrir data contract (.odcs.yaml)"])
+    with st.expander("Preencher a partir de uma DDL, query, arquivo de schema ou contrato existente",
+                     icon=":material/bolt:", expanded=not ss.columns):
+        tab_ddl, tab_file, tab_contract = st.tabs(["Colar DDL, query ou schema", "Abrir arquivo com os campos",
+                                                   "Abrir data contract (.odcs.yaml)"])
         with tab_ddl:
             st.text_area("DDL", key="ddl_text", height=160, label_visibility="collapsed",
-                         placeholder="CREATE TABLE public.cliente (\n  id INTEGER PRIMARY KEY,\n  ...\n);")
-            st.button("Importar colunas da DDL", disabled=not ss.get("ddl_text", "").strip(), on_click=cb_import_ddl)
+                         placeholder="CREATE TABLE public.cliente (\n  id INTEGER PRIMARY KEY,\n  ...\n);\n\n"
+                                     "ou SELECT CAST(id AS INT) AS id, nome::varchar FROM cliente\n"
+                                     "ou JSON (Avro, JSON Schema, StructType) ou uma lista campo;tipo;descrição")
+            st.button("Importar colunas", disabled=not ss.get("ddl_text", "").strip(), on_click=cb_import_ddl)
+        with tab_file:
+            st.file_uploader("Arquivo com os campos", key="schema_upload", label_visibility="collapsed",
+                             type=["sql", "txt", "json", "avsc", "jsonl", "csv", "tsv", "xlsx", "parquet", "md"])
+            st.caption("DDL ou query (.sql), Avro/JSON Schema/StructType (.json, .avsc), lista de campos com nome e "
+                       "tipo (.csv, .xlsx, .md) ou arquivo de dados (.parquet, .csv: tipos inferidos).")
+            st.button("Importar colunas do arquivo", disabled=ss.get("schema_upload") is None,
+                      on_click=cb_import_schema_file)
         with tab_contract:
             st.file_uploader("Data contract", type=["yaml", "yml"], key="upload", label_visibility="collapsed")
             st.button("Carregar contrato", disabled=ss.get("upload") is None, on_click=cb_load_contract)
@@ -322,6 +344,11 @@ def step_contract():
             field_input("Descrição da tabela", "description", placeholder="Cadastro de clientes...")
         with c2:
             field_input("Dono do dado (usuário)", "owner")
+        if ss.form.get("transformationLanguage") not in service.LANGUAGES:
+            ss.form["transformationLanguage"] = "pyspark"
+        bound(st.radio, "Projeto de transformação", "transformationLanguage", options=service.LANGUAGES,
+              format_func=service.LANGUAGE_LABELS.get, horizontal=True,
+              help="Linguagem do projeto <dataset>-transformation gerado.")
 
     with st.container(border=True):
         st.markdown("##### :material/database: Origem")
@@ -530,11 +557,12 @@ def step_validation():
         with tabs[2]:
             transform = sorted(k for k in v.files if k not in ingestion)
             if transform:
-                model = next((k for k in transform if k.endswith("Model.scala") and "/processor/" in k), None)
+                model = next((k for k in transform if k.endswith(("Model.scala", "_model.py")) and "/processor/" in k),
+                             None)
                 st.caption(f"{len(transform)} arquivos")
                 st.code("\n".join(transform), language="text")
                 if model:
-                    st.code(v.files[model], language="scala")
+                    st.code(v.files[model], language="scala" if model.endswith(".scala") else "python")
             else:
                 st.caption("Disponível depois de corrigir os erros.")
 
@@ -548,17 +576,6 @@ def step_validation():
 
 
 # ── Etapa 4: Geração ───────────────────────────────────────────────────
-
-def _zip(base, files: list[str], contract_path) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(contract_path, contract_path.relative_to(base).as_posix())
-        for rel in files:
-            path = base / rel
-            if path.exists():
-                zf.write(path, rel)
-    return buf.getvalue()
-
 
 def step_generation():
     dataset, table = ss.form["dataset"], ss.form["table"]
@@ -574,7 +591,9 @@ def step_generation():
                 "Serão gravados na pasta:\n"
                 f"- `contracts/{dataset}/{table}.odcs.yaml` — o data contract\n"
                 f"- `ingestion-config/{dataset}/{table}.ingestion.yml` — para o orquestrador\n"
-                f"- `{dataset}-transformation/` — projeto da transformação (com git init)\n"
+                f"- `{dataset}-transformation/` — projeto "
+                f"{service.LANGUAGE_LABELS[ss.form.get('transformationLanguage') or 'pyspark']} da transformação "
+                "(com git init)\n"
                 "- `naming/` — nomenclatura revisada")
         bad_prefix = bool(ss.get("publish")) and not str(ss.get("publish_prefix", "")).startswith("s3://")
         nav = st.container(horizontal=True)
@@ -587,7 +606,7 @@ def step_generation():
     st.success(f"Pronto! {len(r.files) + 1} arquivos gravados em `{r.output_dir}`.")
     for uri in r.published:
         st.info(f"Enviado para {uri}")
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     with c1:
         st.download_button("Data contract (.odcs.yaml)", r.contract_path.read_bytes(), r.contract_path.name,
                            icon=":material/download:", use_container_width=True)
@@ -596,11 +615,8 @@ def step_generation():
         if ingestion:
             st.download_button("ingestion.yml", (r.output_dir / ingestion).read_bytes(), ingestion.split("/")[-1],
                                icon=":material/download:", use_container_width=True)
-    with c3:
-        st.download_button("Tudo (.zip)", _zip(r.output_dir, r.files, r.contract_path), f"{dataset}-{table}.zip",
-                           icon=":material/folder_zip:", use_container_width=True)
     st.markdown("**Próximos passos:** envie o `ingestion.yml` ao S3 lido pelo orquestrador (se ainda não enviou) e "
-                f"compile e suba o projeto `{dataset}-transformation`.")
+                f"suba o projeto `{dataset}-transformation`.")
     with st.expander("Arquivos gerados"):
         st.code("\n".join([r.contract_path.relative_to(r.output_dir).as_posix(), *r.files]), language="text")
     with st.expander("Log da geração"):
@@ -662,4 +678,8 @@ with st.sidebar:
     level, message = llm_status(ss.llm_model)
     {"ok": st.success, "warning": st.warning, "error": st.error}.get(level, st.caption)(
         message, **({"icon": LLM_ICONS[level]} if level in LLM_ICONS else {}))
+    with st.expander("Skills do agente", icon=":material/psychology:"):
+        st.caption("O que cada etapa sabe fazer, em `src/framework/skills/` (um SKILL.md por skill).")
+        for skill in list_skills():
+            st.markdown(f"**{skill.name}**  \n:small[{skill.used_by}]", help=skill.description)
     st.button("Começar um novo contrato", icon=":material/restart_alt:", use_container_width=True, on_click=cb_reset)

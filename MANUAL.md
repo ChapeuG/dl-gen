@@ -14,20 +14,22 @@ ao Data Lake:
      ┌──────────┴──────────────┐
      ▼                         ▼
  INGESTÃO                   TRANSFORMAÇÃO
- ingestion.yml              projeto PySpark <dataset>-transformation
+ ingestion.yml              projeto PySpark ou Scala <dataset>-transformation
  (lido pelo orquestrador)   (raw → staging Delta + tabela Hive)
 ```
 
 - **Ingestão:** sai um arquivo `ingestion.yml`, que o projeto
   [`ingestion-orchestrator`](https://github.com/ChapeuG/ingestion-orchestrator) usa para ler a origem e gravar na raw.
-- **Transformação:** sempre sai o projeto PySpark `<dataset>-transformation`, no padrão das skills de transformação.
+- **Transformação:** sempre sai o projeto `<dataset>-transformation`, no padrão das skills de transformação. Você
+  escolhe a linguagem: **PySpark** (padrão) ou **Scala** (sbt).
 
 ---
 
 ## 1. Instalar (uma vez só)
 
-Precisa de **Python 3.10+**. O framework valida os arquivos `.py` gerados sozinho (não precisa de Spark nem de
-Java instalados para gerar).
+Precisa de **Python 3.10+**. No projeto PySpark, o framework valida os `.py` gerados sozinho (não precisa de Spark
+nem de Java). No projeto Scala, para compilar precisa também do **sbt** (sem ele o projeto é gravado, mas não
+compilado).
 
 ```powershell
 git clone https://github.com/ChapeuG/dl-gen.git
@@ -52,10 +54,10 @@ O navegador abre em `http://localhost:8501` com uma linha do tempo de 4 etapas:
 
 | Etapa | O que você faz |
 |---|---|
-| **1. Contrato** | Cola a DDL (ou abre um `.odcs.yaml`) para trazer as colunas, e preenche dataset, origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
+| **1. Contrato** | Traz as colunas colando uma DDL, uma query ou um schema, abrindo um arquivo com os campos (Avro, JSON Schema, planilha, parquet...) ou um `.odcs.yaml` (veja a seção 4), e preenche dataset, o **projeto de transformação** (PySpark ou Scala), origem por ambiente (host, secret) e coluna de partição da raw. O destino na raw é sempre `<bucket>/<dataset>/<tabela>/`. Na tabela de colunas, marca a chave, a coluna incremental e o que criptografar. |
 | **2. Campos** | Recebe os campos com o **nome na staging** e a descrição propostos para a transformação. Edite o que quiser direto na tabela. |
 | **3. Validação** | Vê um checklist (✅ ok, ⚠️ aviso, ❌ erro) e a prévia do contrato, do `ingestion.yml` e da transformação. Com erro, o botão de gerar fica bloqueado. |
-| **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato, o `ingestion.yml` ou tudo em `.zip`. |
+| **4. Geração** | Escolhe a pasta de saída (vazia = `C:\temp_tables`, ou `$DL_OUTPUT_DIR`) e, se quiser, o prefixo S3. Clica em **Gerar arquivos**. Baixa o contrato ou o `ingestion.yml`. |
 
 O que é gravado na pasta de saída: `contracts/<dataset>/<tabela>.odcs.yaml`, `ingestion-config/...`,
 `<dataset>-transformation/` e `naming/`. Para usar LLM na nomenclatura, informe o modelo na barra lateral
@@ -69,15 +71,15 @@ O passo a passo abaixo faz a mesma coisa pela linha de comando.
 
 ### Passo 1 — Escrever o contrato da tabela
 
-O template e os exemplos ficam no projeto do orquestrador:
+O template do contrato fica no projeto do orquestrador:
 
 ```powershell
 git clone https://github.com/ChapeuG/ingestion-orchestrator.git
 cd ingestion-orchestrator
-python scripts\novo_contrato.py sakila actor --domain exemplos
+python scripts\novo_contrato.py <dataset> <tabela> --domain <area>
 ```
 
-Isso cria `contracts\sakila\actor.odcs.yaml`. Abra o arquivo e troque tudo que está como `<...>`. Os comentários
+Isso cria `contracts\<dataset>\<tabela>.odcs.yaml`. Abra o arquivo e troque tudo que está como `<...>`. Os comentários
 explicam cada campo: `[OBRIGATÓRIO]` precisa ser preenchido, `[EXT]` é uma regra nossa.
 
 O mínimo que o contrato precisa ter:
@@ -91,7 +93,7 @@ O mínimo que o contrato precisa ter:
 | Coluna de data para a carga incremental | `partitioned: true` |
 | Coluna de partição da raw | `rawPartitionColumn` (sem valor padrão) |
 
-Para editar visualmente (opcional): `npx datacontract-editor contracts\sakila\actor.odcs.yaml`.
+Para editar visualmente (opcional): `npx datacontract-editor contracts\<dataset>\<tabela>.odcs.yaml`.
 
 ### Passo 2 — Gerar
 
@@ -100,18 +102,16 @@ passe o **caminho completo** do contrato:
 
 ```powershell
 cd C:\trabalho\minha-tabela
-dl-gen generate --contract C:\caminho\do\ingestion-orchestrator\contracts\sakila\actor.odcs.yaml
+dl-gen generate --contract C:\caminho\do\ingestion-orchestrator\contracts\<dataset>\<tabela>.odcs.yaml
 ```
 
 > Erro `Path '...' does not exist`: o caminho relativo não existe na pasta onde o terminal está. Use o caminho completo.
-
-Modelo pronto para testar: `framework\exemplos\cred_final.odcs.yaml` (gerado a partir de `exemplos\cred_final.sql`).
 
 Sai isto na pasta atual:
 
 ```
 ingestion-config\sakila\actor.ingestion.yml     ← ingestão (para o orquestrador)
-sakila-transformation\                          ← projeto PySpark da transformação (já com git init)
+sakila-transformation\                          ← projeto da transformação, PySpark ou Scala (já com git init)
 naming\actor.json                               ← nomes das colunas na staging, para você revisar
 ```
 
@@ -150,7 +150,7 @@ cd sakila-transformation
 git add . ; git commit -m "Transformação actor" ; git push
 ```
 
-Estrutura gerada:
+Estrutura gerada em **PySpark** (padrão):
 
 ```
 sakila-transformation\
@@ -161,12 +161,24 @@ sakila-transformation\
   datalake\utils\, datalake\error\           ← utilitários (Delta MERGE, Hive, enrichment, SQS...)
 ```
 
-Para rodar no cluster:
+Para rodar no cluster, instale o pacote `datalake` com `pip install .` (bootstrap action do EMR, por exemplo) e:
 
 ```bash
-zip -r datalake.zip datalake
-spark-submit --packages io.delta:delta-spark_2.12:3.3.0 --py-files datalake.zip main.py --table_name actor --data_source s3://<raw>/sakila/actor/ --output_uri s3://<bucket>/<time>/sakila/actor
+spark-submit --packages io.delta:delta-spark_2.12:3.3.0 main.py --table_name actor --data_source s3://<raw>/sakila/actor/ --output_uri s3://<bucket>/<time>/sakila/actor
 ```
+
+Em **Scala** (`--language scala`, ou `transformationLanguage: scala` nas `customProperties` do contrato):
+
+```
+sakila-transformation\
+  build.sbt, project\                       ← Spark 3.5 + Delta 3.3, sbt-assembly
+  src\main\scala\br\com\datalake\
+    Main.scala                              ← entry point (--table_name escolhe o processor)
+    processor\actor\ActorModel.scala, ActorProcessor.scala
+    utils\, error\
+```
+
+Compile com `sbt compile` (o jar sai com `sbt assembly`).
 
 O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeCommit), `catalog-info.yaml` e o SDD em
 `docs_sdd\actor_sdd_doc.md`. Complete as seções pendentes do SDD.
@@ -177,16 +189,53 @@ O repositório já sai com `.github/workflows/pipeline.yml` (GitHub → CodeComm
 
 **Sem contrato, só com o DDL** (o que o DDL não informa vai por opção):
 ```powershell
-dl-gen generate --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql --dataset previsao --merge-keys cd_credenciadora,nm_produto,data
+dl-gen generate --ddl C:\caminho\da\tabela.sql --dataset <dataset> --merge-keys <coluna1>,<coluna2>
 ```
+
+**Sem DDL: query, schema ou arquivo com os campos.** O `--ddl` (ou `--schema`, é a mesma opção) aceita qualquer
+arquivo que traga o nome e o tipo dos campos. O framework converte para DDL e segue igual. No Studio, cole o texto
+ou use a aba "Abrir arquivo com os campos".
+
+| Entrada | Exemplo | De onde vem o tipo |
+|---|---|---|
+| Query (`.sql`) | `SELECT CAST(id AS INT) AS id, valor::numeric(12,2) FROM vendas` | `CAST`, `::`, `CONVERT` |
+| Avro (`.avsc`) | `{"type": "record", "fields": [...]}` | tipos e `logicalType` |
+| JSON Schema / StructType do Spark (`.json`) | `{"properties": {...}}` / `df.schema.json()` | `type` e `format` |
+| Lista de campos (`.csv`, `.xlsx`, `.md`, saída de `DESCRIBE`) | `Campo;Tipo;Descrição;PK` | coluna de tipo |
+| Arquivo de dados (`.parquet`, `.csv`) | uma amostra da tabela | inferido |
+
+```powershell
+dl-gen generate --schema C:\caminho\vendas.avsc --dataset vendas
+dl-gen contrato --schema C:\caminho\campos.xlsx --dataset vendas --source-db postgres
+```
+Coluna de query sem `CAST` vira texto, com um aviso no comentário; `SELECT *` é recusado. As regras completas estão
+na skill [`leitura-de-schema`](src/framework/skills/leitura-de-schema/SKILL.md).
 No modo contrato, o yml sai com `PREENCHER` onde faltar informação (servidor, secret, destino). Por isso, para a
 ingestão nova, prefira o contrato.
 
-**Várias tabelas no mesmo projeto de transformação:** gere a primeira normalmente e as próximas com `--append`.
+**Escolher a linguagem da transformação:** `--language pyspark` (padrão) ou `--language scala`. Também vale a
+variável `$DL_LANGUAGE` ou a propriedade `transformationLanguage` do contrato (a flag prevalece).
 
-**Só a lista de campos (`FieldSpec`) para colar num model existente:**
+**Várias tabelas relacionadas numa DDL só** (ex: `actor`, `movies` e a associativa `actor_movies`): crie um contrato
+por tabela e gere tudo de uma vez a partir da pasta:
 ```powershell
-dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o fields.py
+dl-gen contrato --ddl C:\caminho\filmes.sql --dataset filmes --source-db mysql --raw-partition-column dt_ingestao --host <host> --database <db> --secret-id <arn>
+dl-gen generate --contract contracts\filmes
+```
+O primeiro comando grava `contracts\filmes\actor.odcs.yaml`, `movies.odcs.yaml` e `actor_movies.odcs.yaml`. As chaves
+estrangeiras da DDL (`REFERENCES` na coluna ou `FOREIGN KEY ... REFERENCES` da tabela, inclusive compostas) viram
+`relationships` no contrato da tabela que tem a FK (`type: foreignKey`, `to: tabela.coluna`). Com a pasta, o
+framework confere se cada FK aponta para uma coluna que existe no contrato da outra tabela (antes de gerar) e
+documenta a relação na seção 8 do SDD. Sai um `ingestion.yml` por tabela e um projeto de transformação com todas.
+Um contrato com várias tabelas também funciona: `dl-gen generate --contract <arquivo> --all-tables`.
+
+**Várias tabelas no mesmo projeto de transformação:** gere a primeira normalmente e as próximas com `--append`
+(use a mesma linguagem).
+
+**Só o bloco de campos para colar num model existente** (`FieldSpec` em PySpark; `ModelField` em Scala):
+```powershell
+dl-gen campos --ddl C:\caminho\da\tabela.sql -o fields.py
+dl-gen campos --ddl C:\caminho\da\tabela.sql --language scala -o Field.scala
 ```
 
 ---
@@ -196,14 +245,23 @@ dl-gen campos --ddl C:\caminho\do\dl-gen\exemplos\cred_final.sql -o fields.py
 Sem LLM, os nomes saem de um glossário (heurística). Com LLM ficam melhores. O framework sempre confere o resultado
 contra o padrão de nomenclatura e, se o LLM falhar, volta para a heurística sozinho.
 
-- **LiteLLM:** a URL e a chave são lidas de `C:\Users\<matricula>\.claude\settings.json`, no bloco
+- **LiteLLM:** a chamada é feita pela lib oficial `openai` (`OpenAI(base_url=..., api_key=...)`), já que o LiteLLM
+  fala a API da OpenAI. A URL e a chave são lidas de `C:\Users\<matricula>\.claude\settings.json`, no bloco
   `env` (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_API_KEY`, ou `LITELLM_BASE_URL` + `LITELLM_API_KEY`)
   ou no `apiKeyHelper`.
   ```powershell
   dl-gen generate --contract actor.odcs.yaml --llm-model litellm:<modelo>
   ```
   Se o `settings.json` tiver `ANTHROPIC_MODEL`, o LLM liga sem precisar do `--llm-model`.
+
+  Para testar a conexão de verdade (URL, chave e modelo) sem gerar nada:
+  ```powershell
+  dl-gen llm --llm-model litellm:<modelo>
+  ```
 - **Outros provedores:** `--llm-model openai:gpt-4o-mini`, `anthropic:...`, `bedrock:...` (com a chave do provedor).
+
+O prompt enviado ao LLM está na skill [`data-governance-names`](src/framework/skills/data-governance-names/SKILL.md). Para mudar as
+instruções, edite esse arquivo (veja a seção 9).
 
 No fim da execução, a nomenclatura mostra a fonte usada: `contrato`, `arquivo`, `llm` ou `heuristica`.
 Na interface, a barra lateral mostra embaixo do campo do modelo se o LLM está configurado (URL do LiteLLM, pacote,
@@ -219,7 +277,7 @@ Com `--contract`, quase tudo vem do contrato. As opções servem para **sobrescr
 |---|---|---|
 | `--contract` | Data contract ODCS (`.odcs.yaml`) | — |
 | `--table` | Qual tabela do contrato (se tiver mais de uma) | a única |
-| `--ddl` | DDL `CREATE TABLE` (no lugar do contrato) | — |
+| `--ddl` / `--schema` | DDL `CREATE TABLE`, query ou arquivo com os campos (no lugar do contrato; veja a seção 4) | — |
 | `--publish-s3` | Envia o yml para este prefixo S3 | não envia |
 | `--dataset` | Nome do dataset | `dataProduct` do contrato (obrigatório com `--ddl`) |
 | `--source-db` | `postgres`, `oracle`, `mysql`, `sqlserver` | `servers[].type` do contrato |
@@ -253,11 +311,13 @@ Regras que o framework aplica sozinho:
 | `dl-gen` não é reconhecido | Rode `pip install -e ".[ui]"` de novo na pasta do framework |
 | `dl-gen ui` diz que falta o Streamlit | `pip install -e ".[ui]"` |
 | `UnicodeEncodeError` no terminal | Rode `$env:PYTHONUTF8 = "1"` no PowerShell antes do comando |
-| `Transformação falhou` | Um `.py` gerado tem erro de sintaxe (veja o arquivo e a linha no log). Corrija a nomenclatura/contrato e gere de novo |
+| `Transformação falhou` | PySpark: um `.py` gerado tem erro de sintaxe; Scala: o `sbt compile` falhou. Veja o arquivo e a linha no log |
+| `sbt não encontrado` | Só no projeto Scala: ele foi gravado, mas não compilado. Instale o sbt para compilar |
 | Aviso de `PREENCHER` | Falta um campo obrigatório no contrato. Complete e gere de novo |
 | `O contrato tem N tabelas; informe --table` | Use `--table <nome>` |
 | Nome de coluna ruim | Corrija em `naming\<tabela>.json` (ou `stagingName` no contrato) e gere de novo |
-| `LLM indisponível` | A heurística assumiu. Confira a chave do LiteLLM no `settings.json` |
+| `LLM indisponível` | A heurística assumiu. Confira a chave do LiteLLM no `settings.json` e teste com `dl-gen llm` |
+| `Formato não reconhecido` | O arquivo do `--schema` precisa trazer nome e tipo dos campos. Formatos na seção 4 |
 
 ---
 
@@ -269,13 +329,36 @@ python -m pytest tests -q
 
 | Pasta/arquivo | O que tem |
 |---|---|
-| `src/framework/cli.py` | Comandos `generate`, `campos` e `ui` |
+| `src/framework/cli.py` | Comandos `generate`, `contrato`, `campos`, `llm`, `skills` e `ui` |
+| `src/framework/skills/` | Skills do agente: um `SKILL.md` por etapa (seção 9) |
 | `src/framework/ui/` | Interface: `app.py` (tela) e `service.py` (lógica testável) |
 | `src/framework/graph.py` | Fluxo (LangGraph): profiler → nomenclatura → ingestão ∥ transformação → validação |
-| `src/framework/parsers/` | Leitura do contrato (`contract_parser.py`), do DDL e da amostra |
+| `src/framework/parsers/` | Leitura do contrato (`contract_parser.py`), do DDL, dos outros formatos de schema (`schema_reader.py`) e da amostra |
 | `src/framework/agents/` | Uma etapa por arquivo (`input_gen.py` gera o ingestion.yml) |
 | `src/framework/ingestion_config.py` | Formato do `ingestion.yml` |
-| `src/framework/llm.py` | Modelos de LLM (inclui o LiteLLM) |
+| `src/framework/llm.py` | Modelos de LLM (o LiteLLM pela lib `openai`) |
 | `src/framework/standards/` | Padrão de nomenclatura, glossário, tipagem e bancos de origem |
 | `src/framework/templates/` | Templates dos projetos gerados |
-| `exemplos/` | DDLs de exemplo e o modelo de contrato `cred_final.odcs.yaml` |
+
+---
+
+## 9. Skills do agente
+
+As regras que o framework segue vêm das skills em **[`src/framework/skills/`](src/framework/skills/README.md)**:
+um `SKILL.md` por skill (quando usar + regras), com `scripts/` que os templates espelham 1:1 e `references/` com os
+documentos de apoio. São 18: as 16 da biblioteca de transformação Spark + Delta (`sdd-specification`,
+`data-governance-names`, `data-transformation-patterns`, `project-structure`, `processor-orchestration`,
+`job-parameters`, `delta-write-patterns`, `hive-table-management`...) e duas do próprio dl-gen
+(`leitura-de-schema` e `ingestao`). O índice, com onde cada uma é aplicada, está no
+[README da pasta](src/framework/skills/README.md).
+
+- A **data-governance-names** é lida em tempo de execução: o prompt do LLM está no `SKILL.md` dela (seções
+  `Prompt do sistema` e `Prompt do pedido`), e as regras *How to Decide the Prefix* e *Guardrails* entram no prompt.
+  Editar o arquivo muda o que o LLM recebe, sem mexer no código.
+- Os `scripts/*.scala` são a fonte dos utilitários do projeto Scala gerado; um teste garante que continuam iguais.
+
+```powershell
+dl-gen skills
+```
+
+No Studio, a barra lateral mostra as skills em "Skills do agente".

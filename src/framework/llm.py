@@ -1,7 +1,7 @@
 """Fábrica de modelos de chat (LangChain).
 
 O modelo é escolhido por string "provedor:modelo", ex:
-    litellm:<modelo>            (proxy LiteLLM; chave lida do settings.json do Claude Code, ver abaixo)
+    litellm:<modelo>            (proxy LiteLLM pela lib `openai`; chave lida do settings.json do Claude Code, ver abaixo)
     openai:gpt-4o-mini          (requer langchain-openai + OPENAI_API_KEY)
     anthropic:claude-sonnet-5-5 (requer langchain-anthropic + ANTHROPIC_API_KEY)
     azure_openai:<deployment>   (requer langchain-openai + variáveis AZURE_OPENAI_*)
@@ -119,6 +119,8 @@ def check_model(model: str) -> tuple[str, str]:
     if not model:
         return "off", "Sem LLM: os nomes vêm do glossário (heurística)."
     if model.startswith(LITELLM_PREFIX):
+        if importlib.util.find_spec("openai") is None:
+            return "error", "Falta o pacote openai (pip install openai) para usar o LiteLLM. Usando o glossário."
         try:
             cfg = load_litellm_config()
         except RuntimeError as e:
@@ -142,25 +144,84 @@ def check_model(model: str) -> tuple[str, str]:
     return "ok", f"{provider} configurado (chave em {key})."
 
 
-def _litellm_chat_model(model_name: str):
-    from langchain_openai import ChatOpenAI
+LITELLM_TIMEOUT_S = 120
 
-    cfg = load_litellm_config()
+_ROLES = {"system": "system", "human": "user", "ai": "assistant"}
+
+
+def get_openai_client(cfg: LiteLLMConfig | None = None):
+    """Cliente da lib oficial da OpenAI apontando para o proxy LiteLLM (API compatível com OpenAI)."""
+    from openai import OpenAI
+
+    cfg = cfg or load_litellm_config()
     if cfg is None:
         raise RuntimeError(f"Chave do LiteLLM não encontrada em {claude_settings_path()} "
                            f"(env: {'/'.join(_BASE_URL_KEYS)} e {'/'.join(_API_KEY_KEYS)}, ou apiKeyHelper)")
+    return OpenAI(base_url=cfg.base_url, api_key=cfg.api_key, timeout=LITELLM_TIMEOUT_S, max_retries=2)
+
+
+def _openai_messages(prompt) -> list[dict]:
+    """Prompt do LangChain (ChatPromptValue/mensagens) ou texto → mensagens no formato da OpenAI."""
+    if isinstance(prompt, str):
+        return [{"role": "user", "content": prompt}]
+    messages = prompt.to_messages() if hasattr(prompt, "to_messages") else prompt
+    return [m if isinstance(m, dict) else {"role": _ROLES.get(m.type, "user"), "content": m.content} for m in messages]
+
+
+class LiteLLMChat:
+    """Modelo do LiteLLM chamado pela lib `openai` (client.chat.completions.create).
+
+    Mesma interface que o agente usa do LangChain: `invoke(prompt)` devolve o texto e
+    `with_structured_output(Modelo)` devolve um runnable que preenche o modelo Pydantic por tool calling
+    (aceito por todos os modelos atrás do proxy).
+    """
+
+    def __init__(self, model: str, client, temperature: float = 0):
+        self.model_name = model
+        self.client = client
+        self.temperature = temperature
+
+    def _create(self, prompt, **kwargs):
+        return self.client.chat.completions.create(model=self.model_name, messages=_openai_messages(prompt),
+                                                   temperature=self.temperature, **kwargs)
+
+    def invoke(self, prompt) -> str:
+        return self._create(prompt).choices[0].message.content or ""
+
+    def with_structured_output(self, schema, **_kwargs):
+        from langchain_core.runnables import RunnableLambda
+
+        name = schema.__name__
+        tool = {"type": "function", "function": {"name": name, "description": (schema.__doc__ or name).strip(),
+                                                 "parameters": schema.model_json_schema()}}
+
+        def call(prompt):
+            message = self._create(prompt, tools=[tool],
+                                   tool_choice={"type": "function", "function": {"name": name}}).choices[0].message
+            if message.tool_calls:
+                return schema.model_validate_json(message.tool_calls[0].function.arguments)
+            if message.content:  # modelo que respondeu em JSON no texto em vez de chamar a ferramenta
+                return schema.model_validate_json(message.content.strip().removeprefix("```json").strip("`\n "))
+            raise RuntimeError(f"O LLM não devolveu {name} (sem tool call nem conteúdo)")
+
+        return RunnableLambda(call)
+
+
+def _litellm_chat_model(model_name: str) -> LiteLLMChat:
+    cfg = load_litellm_config()
+    client = get_openai_client(cfg)
     name = model_name or cfg.model
     if not name:
         raise RuntimeError("Informe o modelo: --llm-model litellm:<modelo> (ou ANTHROPIC_MODEL no settings.json)")
+    return LiteLLMChat(name, client)
 
-    class LiteLLMChat(ChatOpenAI):
-        """Proxy LiteLLM (API compatível com OpenAI). Saída estruturada por tool calling, aceita por todos os modelos."""
 
-        def with_structured_output(self, schema, **kwargs):
-            kwargs.setdefault("method", "function_calling")
-            return super().with_structured_output(schema, **kwargs)
-
-    return LiteLLMChat(model=name, base_url=cfg.base_url, api_key=cfg.api_key, temperature=0)
+def ping(model: str) -> str:
+    """Chamada real e curta ao LLM, para conferir URL, chave e modelo. Devolve a resposta do modelo."""
+    if not model:
+        raise RuntimeError("Sem modelo: informe --llm-model (ex: litellm:<modelo>) ou ANTHROPIC_MODEL no settings.json")
+    reply = get_chat_model(model).invoke("Responda apenas com a palavra: ok")
+    return (reply if isinstance(reply, str) else getattr(reply, "content", str(reply))).strip()
 
 
 def get_chat_model(model: str):

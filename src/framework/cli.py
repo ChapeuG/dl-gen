@@ -14,9 +14,11 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from framework.agents.transform_gen import resolve_language
 from framework.graph import build_graph
 from framework.llm import DEFAULT_MODEL_ENV, resolve_model_name
-from framework.parsers.contract_parser import custom_props, load_contract, resolve_table
+from framework.parsers.schema_reader import read_schema
+from framework.parsers.contract_parser import check_relationships, custom_props, load_contract, resolve_table
 from framework.standards.sources import SOURCES
 from framework.state import FrameworkState
 
@@ -25,7 +27,7 @@ console = Console()
 
 @click.group()
 def main():
-    """Data Lake Generator — gera o ingestion.yml e o projeto PySpark de transformação a partir do data contract."""
+    """Data Lake Generator — gera o ingestion.yml e o projeto de transformação (PySpark ou Scala) a partir do data contract."""
     pass
 
 
@@ -41,6 +43,10 @@ def naming_options(f):
                      type=click.Choice(sorted(SOURCES), case_sensitive=False),
                      help="Banco de origem: define a tipagem e o conector do orquestrador. "
                           "Default: servers[].type do contrato, $DL_SOURCE_DB ou postgres")(f)
+    f = click.option("--language", envvar="DL_LANGUAGE", default=None,
+                     type=click.Choice(["pyspark", "scala"], case_sensitive=False),
+                     help="Linguagem do projeto de transformação. "
+                          "Default: transformationLanguage do contrato, $DL_LANGUAGE ou pyspark")(f)
     f = click.option("--codecommit-transformation", default="",
                      help="Repositório CodeCommit do pipeline da transformação. Default: <dataset>-transformation")(f)
     f = click.option("--github-org", default="datalake-org", show_default=True,
@@ -58,10 +64,19 @@ def naming_options(f):
     f = click.option("--contract", "contract_path", required=False, type=click.Path(exists=True),
                      help="Data contract ODCS (.odcs.yaml). Substitui o --ddl e preenche dataset, banco, partição, "
                           "merge e criptografia (flags informadas prevalecem)")(f)
-    f = click.option("--ddl", required=False, type=click.Path(exists=True), help="Caminho do arquivo DDL (.sql)")(f)
+    f = click.option("--ddl", "--schema", "ddl", required=False, type=click.Path(exists=True, dir_okay=False),
+                     help="DDL (.sql) ou qualquer arquivo com nome e tipo dos campos: query SELECT, Avro/JSON Schema/StructType (.json), lista de campos (.csv, .xlsx, .md) ou dados (.parquet, .csv)")(f)
     f = click.option("--tipagem", "tipagem_path", envvar="DL_TIPAGEM", required=False, type=click.Path(exists=True),
                      help="Planilha Tipagem.xlsx (Tipo Origem → Tipo Final). Default: $DL_TIPAGEM; sem ela vale a tabela oficial embutida")(f)
     return f
+
+
+def _read_fields(path: str) -> str:
+    """Arquivo de entrada (DDL, query, JSON, planilha, parquet...) → DDL."""
+    try:
+        return read_schema(Path(path))
+    except (ValueError, UnicodeDecodeError) as e:
+        raise click.UsageError(f"{path}: {e}") from None
 
 
 def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None, tipagem_path: str | None,
@@ -69,7 +84,7 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
                    source_db: str | None = None, partition_col: str = "", merge_keys: str = "",
                    github_org: str = "datalake-org", codecommit_transformation: str = "",
                    contract_path: str | None = None, contract_table: str = "",
-                   contract_text: str = "") -> FrameworkState:
+                   contract_text: str = "", language: str | None = None) -> FrameworkState:
     if contract_path:
         contract_text = Path(contract_path).read_text(encoding="utf-8")
     if bool(ddl) == bool(contract_text):
@@ -90,14 +105,19 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
         if github_org == "datalake-org" and extra.get("githubOrg"):
             github_org = extra["githubOrg"]
         codecommit_transformation = codecommit_transformation or extra.get("codecommitTransformation", "")
+        language = language or extra.get("transformationLanguage")
         contract_table = ct.table["name"]
 
     if not dataset:
         raise click.UsageError("Informe --dataset (com --ddl ele é obrigatório; no contrato vem de dataProduct)")
     source_db = (source_db or "postgres").lower()
+    try:
+        language = resolve_language(language)
+    except ValueError as e:
+        raise click.UsageError(str(e)) from None
 
     return {
-        "ddl": Path(ddl).read_text(encoding="utf-8") if ddl else "",
+        "ddl": _read_fields(ddl) if ddl else "",
         "contract": contract_text,
         "contract_table": contract_table,
         "sample_path": sample_path or "",
@@ -114,6 +134,7 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
         "merge_keys": merge_key_list,
         "github_org": github_org,
         "codecommit_transformation": codecommit_transformation,
+        "language": language,
         "schema": None,
         "profile": None,
         "naming_source": "",
@@ -136,15 +157,15 @@ def _initial_state(ddl: str | None, sample_path: str | None, dataset: str | None
 @main.command()
 @click.option("--sample", "sample_path", required=False, type=click.Path(exists=True), help="Amostra (.csv, .json, .parquet) — ajuda o LLM com exemplos de valores")
 @click.option("--dataset", default=None, help="Nome do dataset (ex: vendas). Default: dataProduct do contrato (obrigatório com --ddl)")
-@click.option("--output", "-o", required=False, type=click.Path(), help="Grava a lista de FieldSpec neste arquivo")
+@click.option("--output", "-o", required=False, type=click.Path(), help="Grava o bloco de campos neste arquivo")
 @click.option("--dry-run", is_flag=True, help="Não grava o arquivo de nomenclatura")
 @naming_options
 def campos(sample_path: str | None, dataset: str | None, output: str | None, dry_run: bool,
            ddl: str | None, contract_path: str | None, contract_table: str,
            tipagem_path: str | None, llm_model: str | None, naming_dir: str, encrypt: str,
            source_db: str | None, partition_col: str,
-           merge_keys: str, github_org: str, codecommit_transformation: str):
-    """Gera só a lista de campos (FieldSpec do model PySpark) no padrão de nomenclatura a partir do DDL."""
+           merge_keys: str, github_org: str, codecommit_transformation: str, language: str | None):
+    """Gera só o bloco de campos (FieldSpec em PySpark ou ModelField em Scala) a partir do DDL."""
     from framework.agents.naming import naming_agent
     from framework.agents.profiler import profiler_agent
     from framework.agents.transform_gen import render_field_block
@@ -152,16 +173,72 @@ def campos(sample_path: str | None, dataset: str | None, output: str | None, dry
     state = _initial_state(ddl, sample_path, dataset, tipagem_path, llm_model, naming_dir, dry_run, encrypt,
                            source_db, partition_col, merge_keys,
                            github_org, codecommit_transformation,
-                           contract_path, contract_table)
+                           contract_path, contract_table, language=language)
     state = {**state, **profiler_agent(state)}
     state = {**state, **naming_agent(state)}
 
-    block = render_field_block(state["schema"], state.get("profile"))
+    block = render_field_block(state["schema"], state.get("profile"), state["language"])
     if output:
         Path(output).write_text(block + "\n", encoding="utf-8")
         console.print(f"[green]Bloco gravado em {output}[/green]")
     click.echo()
     click.echo(block)
+
+
+def _contract_targets(contract_path: str) -> list[tuple[str, str]]:
+    """Contrato (todas as tabelas) ou pasta de contratos (*.odcs.yaml) → [(arquivo, tabela)], com as FKs cruzadas."""
+    p = Path(contract_path)
+    files = sorted(p.rglob("*.odcs.yaml")) if p.is_dir() else [p]
+    if not files:
+        raise click.UsageError(f"Nenhum *.odcs.yaml em {contract_path}")
+    try:
+        contracts = [(f, load_contract(f.read_text(encoding="utf-8"))) for f in files]
+        check_relationships([c for _, c in contracts])
+    except ValueError as e:
+        raise click.UsageError(str(e)) from None
+    return [(str(f), t["name"]) for f, c in contracts for t in c["schema"]]
+
+
+@main.command()
+@click.option("--ddl", "--schema", "ddl", required=True, type=click.Path(exists=True, dir_okay=False),
+              help="DDL com um ou vários CREATE TABLE, ou outro arquivo com nome e tipo dos campos (veja generate --help)")
+@click.option("--dataset", required=True, help="Nome do dataset (dataProduct do contrato)")
+@click.option("--source-db", default="postgres", show_default=True,
+              type=click.Choice(sorted(SOURCES), case_sensitive=False), help="Banco de origem")
+@click.option("--raw-partition-column", default="", help="Coluna de partição da raw (ex: dt_ingestao)")
+@click.option("--env", "environment", default="prd", show_default=True, help="Ambiente do servidor de origem")
+@click.option("--host", default="", help="Host do banco de origem")
+@click.option("--port", default=None, type=int, help="Porta do banco de origem")
+@click.option("--database", default="", help="Database (ou serviceName no Oracle)")
+@click.option("--secret-id", default="", help="ARN da secret com usuário/senha")
+@click.option("--language", default="pyspark", show_default=True,
+              type=click.Choice(["pyspark", "scala"], case_sensitive=False), help="Linguagem da transformação")
+@click.option("--output-dir", "-o", default="contracts", show_default=True, type=click.Path(file_okay=False),
+              help="Pasta dos contratos: grava <pasta>/<dataset>/<tabela>.odcs.yaml")
+def contrato(ddl: str, dataset: str, source_db: str, raw_partition_column: str, environment: str, host: str,
+             port: int | None, database: str, secret_id: str, language: str, output_dir: str):
+    """Cria um data contract (ODCS) por tabela da DDL, com as chaves estrangeiras em relationships."""
+    from framework.ui import service
+
+    form = {"dataset": dataset, "sourceType": source_db.lower(), "rawPartitionColumn": raw_partition_column,
+            "transformationLanguage": language.lower()}
+    servers = [{"environment": environment, "host": host, "port": port, "database": database, "secretId": secret_id}]
+    try:
+        contracts = service.contracts_from_ddl(_read_fields(ddl), form, servers)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from None
+
+    folder = Path(output_dir) / dataset.lower()
+    folder.mkdir(parents=True, exist_ok=True)
+    console.print(f"[green]{len(contracts)} contrato(s) em {folder.resolve()}[/green]")
+    for contract in contracts:
+        table = contract["schema"][0]
+        path = folder / f"{table['name']}.odcs.yaml"
+        path.write_text(service.dump_contract(contract), encoding="utf-8")
+        refs = [f"{p['name']} → {r['to']}" for p in table["properties"] for r in p.get("relationships") or []]
+        console.print(f"  {path.name}: {len(table['properties'])} colunas"
+                      + (f"; relações: {', '.join(refs)}" if refs else ""))
+    console.print(f"\nGere tudo com: dl-gen generate --contract {folder}")
 
 
 @main.command()
@@ -171,23 +248,37 @@ def campos(sample_path: str | None, dataset: str | None, output: str | None, dry
 @click.option("--max-iterations", default=5, help="Máximo de iterações do feedback loop")
 @click.option("--skip-input", is_flag=True, help="Pula a geração do ingestion.yml (só Transformation)")
 @click.option("--append", is_flag=True, help="Acumula no projeto de transformação já existente em --output-dir")
+@click.option("--all-tables", is_flag=True,
+              help="Gera todas as tabelas do contrato (um ingestion.yml por tabela, um projeto de transformação). "
+                   "Com --contract <pasta> é automático")
 @click.option("--dry-run", is_flag=True, help="Não escreve arquivos no disco, só mostra")
 @click.option("--output-dir", default=".", show_default=True, type=click.Path(file_okay=False),
               help="Pasta onde os projetos são criados (default: pasta atual)")
 @naming_options
-def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
-             max_iterations: int, skip_input: bool, append: bool, dry_run: bool, output_dir: str,
+@click.pass_context
+def generate(ctx: click.Context, sample_path: str | None, dataset: str | None, publish_s3: str,
+             max_iterations: int, skip_input: bool, append: bool, all_tables: bool, dry_run: bool, output_dir: str,
              ddl: str | None, contract_path: str | None, contract_table: str,
              tipagem_path: str | None, llm_model: str | None, naming_dir: str, encrypt: str,
              source_db: str | None, partition_col: str,
-             merge_keys: str, github_org: str, codecommit_transformation: str):
+             merge_keys: str, github_org: str, codecommit_transformation: str, language: str | None):
     """Gera o ingestion.yml e o projeto de transformação a partir do data contract ou do DDL."""
+    if all_tables or (contract_path and Path(contract_path).is_dir()):
+        if not contract_path:
+            raise click.UsageError("--all-tables exige --contract")
+        targets = _contract_targets(contract_path)
+        for i, (path, table) in enumerate(targets):
+            console.print(f"\n[bold cyan]── Tabela {i + 1}/{len(targets)}: {table} ({Path(path).name})[/bold cyan]")
+            # A partir da segunda, acumula no mesmo projeto de transformação
+            ctx.invoke(generate, **{**ctx.params, "all_tables": False, "contract_path": path,
+                                    "contract_table": table, "append": append or i > 0})
+        return
 
     # Estado inicial
     initial_state = _initial_state(ddl, sample_path, dataset, tipagem_path, llm_model, naming_dir, dry_run, encrypt,
                                    source_db, partition_col, merge_keys,
                                    github_org, codecommit_transformation,
-                                   contract_path, contract_table)
+                                   contract_path, contract_table, language=language)
     dataset = initial_state["dataset"]
     initial_state["max_iterations"] = max_iterations
     initial_state["skip_input"] = skip_input
@@ -200,7 +291,8 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
         transform_dir = base_dir / f"{dataset}-transformation"
         if transform_dir.exists():
             existing_files = {}
-            for f in transform_dir.rglob("*.py"):
+            pattern = "*.scala" if initial_state["language"] == "scala" else "*.py"
+            for f in transform_dir.rglob(pattern):
                 rel = f.relative_to(base_dir).as_posix()
                 existing_files[rel] = f.read_text(encoding="utf-8")
             initial_state["transform_files"] = existing_files
@@ -215,6 +307,7 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
         f"{'Data contract: ' + contract_path if contract_path else 'DDL: ' + str(ddl)}\n"
         f"Amostra: {sample_path or '(nenhuma)'}\n"
         f"Dataset: {dataset}\n"
+        f"Transformação: {initial_state['language']}\n"
         f"Destino: {output_path}\n"
         f"Max iterações: {max_iterations}\n"
         f"Skip Input: {skip_input}\n"
@@ -289,6 +382,35 @@ def generate(sample_path: str | None, dataset: str | None, publish_s3: str,
     except Exception as e:
         console.print(f"\n[bold red]Erro:[/bold red] {e}")
         sys.exit(1)
+
+
+@main.command()
+@click.option("--llm-model", default=None, envvar=DEFAULT_MODEL_ENV,
+              help="Modelo a testar (ex: litellm:<modelo>). Default: $DL_LLM_MODEL ou ANTHROPIC_MODEL do settings.json")
+def llm(llm_model: str | None):
+    """Testa o LLM de verdade: confere a configuração e faz uma chamada curta (LiteLLM pela lib openai)."""
+    from framework.llm import check_model, ping
+
+    model = resolve_model_name(llm_model)
+    level, message = check_model(model)
+    console.print(f"Modelo: {model or '(nenhum)'}\nConfiguração: {message}")
+    if level in ("off", "error"):
+        sys.exit(1)
+    try:
+        console.print(f"[green]Resposta do LLM:[/green] {ping(model)}")
+    except Exception as e:  # rede, chave recusada, modelo inexistente no proxy...
+        console.print(f"[bold red]Falhou:[/bold red] {type(e).__name__}: {e}")
+        sys.exit(1)
+
+
+@main.command()
+def skills():
+    """Lista as skills do agente (pasta src/framework/skills): o que cada etapa sabe fazer."""
+    from framework.skills import SKILLS_DIR, list_skills
+
+    console.print(f"[cyan]Skills em {SKILLS_DIR}[/cyan]\n")
+    for skill in list_skills():
+        console.print(f"[bold]{skill.name}[/bold]  → {skill.used_by}\n  {skill.description}\n  {skill.path}\n")
 
 
 @main.command()
